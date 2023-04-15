@@ -1,0 +1,31 @@
+{
+  "name": "ingest",
+  "version": "1.0.0",
+  "main": "src/index.js",
+  "type": "module",
+  "scripts": {
+    "start": "dotenv -- node src/index.js",
+    "dev": "npm run start | pino-pretty",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "engines": {
+    "node": "18.x.x"
+  },
+  "dependencies": {
+    "body-parser": "^1.20.2",
+    "dotenv-cli": "^7.2.1",
+    "express": "^4.18.2",
+    "http-terminator": "^3.2.0",
+    "pg": "^8.10.0",
+    "pino": "^8.11.0"
+  },
+  "devDependencies": {
+    "eslint": "^8.38.0",
+    "eslint-config-prettier": "^8.8.0",
+    "eslint-plugin-import": "^2.27.5",
+    "eslint-plugin-node": "^11.1.0",
+    "eslint-plugin-prettier": "^4.2.1",
+    "pino-pretty": "^10.0.0",
+    "prettier": "^2.8.7"
+  }
+}
