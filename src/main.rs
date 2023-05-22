@@ -1,6 +1,7 @@
 mod db;
 mod error;
 mod ingest;
+mod mgmt;
 mod proxy;
 
 use std::result::Result as StdResult;
@@ -12,6 +13,7 @@ use axum::http::Request;
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::{routing::post, Router};
+use db::ensure_schema;
 use hyper::HeaderMap;
 use sqlx::sqlite::SqlitePool;
 use tracing::Level;
@@ -32,28 +34,41 @@ async fn main() -> Result<()> {
         .with(tracing_subscriber::fmt::layer())
         .init();
 
-    let app = app().await?;
+    let (ingest, mgmt) = app().await?;
+
+    let addr = "0.0.0.0:3443";
+    let addr = addr.parse()?;
+    tokio::spawn(async move {
+        tracing::info!("management API listening on {}", addr);
+        axum::Server::bind(&addr)
+            .serve(mgmt.into_make_service())
+            .await
+            .unwrap();
+    });
 
     let addr = "0.0.0.0:3000";
-    tracing::info!("listening on {}", addr);
+    tracing::info!("ingest listening on {}", addr);
     axum::Server::bind(&addr.parse()?)
-        .serve(app.into_make_service())
+        .serve(ingest.into_make_service())
         .await?;
 
     Ok(())
 }
 
-async fn app() -> Result<Router> {
-    let client = Client::new();
-
-    // sqlite:soldr.db
+async fn app() -> Result<(Router, Router)> {
+    // TODO write to actual database, such as sqlite:soldr.db
     let pool = SqlitePool::connect("sqlite::memory:").await?;
+    ensure_schema(&pool).await?;
+
+    let mgmt_router = mgmt::router(pool.clone());
+
+    let client = Client::new();
     let router = Router::new()
         .route("/", post(handler))
         .layer(Extension(pool))
         .with_state(client);
 
-    Ok(router)
+    Ok((router, mgmt_router))
 }
 
 async fn handler(
@@ -124,11 +139,11 @@ mod tests {
                 .unwrap();
         });
 
-        let app = app().await.unwrap();
+        let (ingest, mgmt) = app().await.unwrap();
 
         // `Router` implements `tower::Service<Request<Body>>` so we can
         // call it like any tower service, no need to run an HTTP server.
-        let response = app
+        let response = ingest
             .oneshot(
                 Request::builder()
                     .method("POST")
@@ -141,5 +156,44 @@ mod tests {
             .unwrap();
 
         assert_eq!(response.status(), StatusCode::NO_CONTENT);
+
+        let response = mgmt
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/requests")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let body = hyper::body::to_bytes(response.into_body()).await.unwrap();
+
+        let reqs: Vec<db::Request> = serde_json::from_slice(&body).unwrap();
+        assert!(reqs[0].complete);
+    }
+
+    #[tokio::test]
+    async fn mgmt_hello_world() {
+        let (_, mgmt) = app().await.unwrap();
+
+        let response = mgmt
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/requests")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let body = hyper::body::to_bytes(response.into_body()).await.unwrap();
+        assert_eq!(&body[..], b"[]");
     }
 }

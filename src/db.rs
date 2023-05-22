@@ -1,10 +1,11 @@
 use anyhow::Result;
+use serde::{Deserialize, Serialize};
 use sqlx::sqlite::SqlitePool;
 use sqlx::Executor;
 
 use crate::ingest::HttpRequest;
 
-#[derive(Debug, sqlx::FromRow)]
+#[derive(Debug)]
 pub struct QueuedRequest {
     pub id: i64,
     pub method: String,
@@ -13,7 +14,17 @@ pub struct QueuedRequest {
     pub body: Option<Vec<u8>>,
 }
 
-pub async fn insert_request(pool: &SqlitePool, req: HttpRequest) -> Result<QueuedRequest> {
+#[derive(Debug, Deserialize, Serialize, sqlx::FromRow)]
+pub struct Request {
+    pub id: i64,
+    pub method: String,
+    pub uri: String,
+    pub headers: String,
+    pub body: Option<Vec<u8>>,
+    pub complete: bool,
+}
+
+pub async fn ensure_schema(pool: &SqlitePool) -> Result<()> {
     let mut conn = pool.acquire().await?;
 
     conn.execute(
@@ -27,6 +38,12 @@ pub async fn insert_request(pool: &SqlitePool, req: HttpRequest) -> Result<Queue
         )",
     )
     .await?;
+
+    Ok(())
+}
+
+pub async fn insert_request(pool: &SqlitePool, req: HttpRequest) -> Result<QueuedRequest> {
+    let mut conn = pool.acquire().await?;
 
     let headers_json = serde_json::to_string(&req.headers)?;
 
@@ -63,4 +80,14 @@ pub async fn mark_complete(pool: &SqlitePool, req_id: i64) -> Result<()> {
         .await?;
 
     Ok(())
+}
+
+pub async fn list_requests(pool: &SqlitePool) -> Result<Vec<Request>> {
+    let mut conn = pool.acquire().await?;
+
+    let requests = sqlx::query_as::<_, Request>("SELECT * FROM requests LIMIT 10;")
+        .fetch_all(&mut conn)
+        .await?;
+
+    Ok(requests)
 }
