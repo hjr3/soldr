@@ -29,7 +29,7 @@ async fn main() -> Result<()> {
     tracing_subscriber::registry()
         .with(
             tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "soldr=debug".into()),
+                .unwrap_or_else(|_| "soldr=info".into()),
         )
         .with(tracing_subscriber::fmt::layer())
         .init();
@@ -91,12 +91,12 @@ async fn handler(
         body: Some(body.to_vec()),
     };
 
-    tracing::trace!("{:?}", &r);
+    tracing::debug!("{:?}", &r);
 
     let queued_req = insert_request(&pool, r).await?;
     let req_id = queued_req.id;
 
-    proxy(&client, queued_req).await?;
+    proxy(&pool, &client, queued_req).await?;
 
     mark_complete(&pool, req_id).await?;
 
@@ -119,17 +119,53 @@ fn transform_headers(headers: &HeaderMap) -> Vec<(String, String)> {
 
 #[cfg(test)]
 mod tests {
+    use crate::mgmt::CreateOrigin;
+
     use super::*;
     use std::net::{SocketAddr, TcpListener};
+    use std::sync::Arc;
+    use std::sync::Once;
 
     use axum::body::Body;
-    use axum::routing::get;
+    use tokio::sync::Mutex;
     use tower::ServiceExt; // for `oneshot` and `ready`
+
+    pub static TRACING_INITIALIZED: Once = Once::new();
+
+    // Help function to add tracing to tests
+    // Note: This is safe to use for multiple tests, but since tests are run concurrently the
+    // output may be interleaved
+    #[allow(dead_code)]
+    fn enable_tracing() {
+        TRACING_INITIALIZED.call_once(|| {
+            tracing_subscriber::registry()
+                .with(
+                    tracing_subscriber::EnvFilter::try_from_default_env()
+                        .unwrap_or_else(|_| "soldr=trace".into()),
+                )
+                .with(tracing_subscriber::fmt::layer())
+                .init();
+        });
+    }
 
     #[tokio::test]
     async fn ingest_save_and_proxy() {
+        enable_tracing();
+
+        // set up origin server
         let listener = TcpListener::bind("0.0.0.0:3001".parse::<SocketAddr>().unwrap()).unwrap();
-        let client_app = Router::new().route("/", get(|| async { "Hello, World!" }));
+        let sentinel = Arc::new(Mutex::new(false));
+        let s2 = sentinel.clone();
+        let client_app = Router::new().route(
+            "/",
+            post(|| async move {
+                dbg!("here");
+                let mut lock = s2.lock().await;
+                // TODO put the whole request in the lock so we can assert it later
+                *lock = true;
+                "Hello, World!"
+            }),
+        );
 
         tokio::spawn(async move {
             axum::Server::from_tcp(listener)
@@ -141,6 +177,29 @@ mod tests {
 
         let (ingest, mgmt) = app().await.unwrap();
 
+        // create an origin mapping
+        let domain = "example.wh.soldr.dev";
+        let create_origin = CreateOrigin {
+            domain: domain.to_string(),
+            origin_uri: "http://localhost:3001".to_string(),
+        };
+        let body = serde_json::to_string(&create_origin).unwrap();
+        let response = mgmt
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/origin")
+                    .header("Content-Type", "application/json")
+                    .body(body.into())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        // send a webhook request
         // `Router` implements `tower::Service<Request<Body>>` so we can
         // call it like any tower service, no need to run an HTTP server.
         let response = ingest
@@ -148,7 +207,7 @@ mod tests {
                 Request::builder()
                     .method("POST")
                     .uri("/")
-                    .header("Host", "localhost:3000")
+                    .header("Host", domain)
                     .body(Body::empty())
                     .unwrap(),
             )
@@ -156,7 +215,10 @@ mod tests {
             .unwrap();
 
         assert_eq!(response.status(), StatusCode::NO_CONTENT);
+        let lock = sentinel.lock().await;
+        assert!(*lock);
 
+        // use management API to verify the request is marked complete
         let response = mgmt
             .oneshot(
                 Request::builder()
@@ -177,7 +239,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn mgmt_hello_world() {
+    async fn mgmt_list_requests() {
         let (_, mgmt) = app().await.unwrap();
 
         let response = mgmt
@@ -195,5 +257,35 @@ mod tests {
 
         let body = hyper::body::to_bytes(response.into_body()).await.unwrap();
         assert_eq!(&body[..], b"[]");
+    }
+
+    #[tokio::test]
+    async fn mgmt_create_origin() {
+        let (_, mgmt) = app().await.unwrap();
+
+        let create_origin = CreateOrigin {
+            domain: "example.wh.soldr.dev".to_string(),
+            origin_uri: "https://www.example.com".to_string(),
+        };
+        let body = serde_json::to_string(&create_origin).unwrap();
+        let response = mgmt
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/origin")
+                    .header("Content-Type", "application/json")
+                    .body(body.into())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let body = hyper::body::to_bytes(response.into_body()).await.unwrap();
+        let origin: db::Origin = serde_json::from_slice(&body).unwrap();
+        assert_eq!(origin.id, 1);
+        assert_eq!(origin.domain, create_origin.domain);
+        assert_eq!(origin.origin_uri, create_origin.origin_uri);
     }
 }

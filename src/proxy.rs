@@ -3,13 +3,15 @@ use axum::http::Request;
 use axum::http::Uri;
 use hyper::client::HttpConnector;
 use hyper::Body;
+use sqlx::SqlitePool;
 
+use crate::db::list_origins;
 use crate::db::QueuedRequest;
 
 pub type Client = hyper::client::Client<HttpConnector, Body>;
 
-pub async fn proxy(client: &Client, mut req: QueuedRequest) -> Result<()> {
-    let uri = map_origin(&req)?;
+pub async fn proxy(pool: &SqlitePool, client: &Client, mut req: QueuedRequest) -> Result<()> {
+    let uri = map_origin(pool, &req).await?;
 
     if uri.is_none() {
         // no origin found, so mark as complete and move on
@@ -23,15 +25,21 @@ pub async fn proxy(client: &Client, mut req: QueuedRequest) -> Result<()> {
 
     let new_req = Request::builder()
         .method(req.method.as_str())
-        .uri(uri)
+        .uri(&uri)
         .body(body)?;
 
-    client.request(new_req).await?;
+    let response = client.request(new_req).await?;
+    tracing::debug!(
+        "Proxy {:?} --> {} with {} response",
+        &req,
+        &uri,
+        response.status()
+    );
 
     Ok(())
 }
 
-fn map_origin(req: &QueuedRequest) -> Result<Option<Uri>> {
+async fn map_origin(pool: &SqlitePool, req: &QueuedRequest) -> Result<Option<Uri>> {
     let uri = Uri::try_from(&req.uri)?;
     let parts = uri.into_parts();
 
@@ -52,14 +60,25 @@ fn map_origin(req: &QueuedRequest) -> Result<Option<Uri>> {
                 })
             })??
     };
+    tracing::debug!("authority = {}", &authority);
 
-    // FIXME this should be a database lookup
-    let domain = match authority.as_str() {
-        "localhost:3000" => "http://127.0.0.1:3001",
-        _ => return Ok(None),
+    let origins = list_origins(pool).await?;
+    tracing::debug!("origins = {:?}", &origins);
+    let matching_origin = origins
+        .iter()
+        .find(|origin| origin.domain == authority.as_str());
+
+    let origin_uri = match matching_origin {
+        Some(origin) => &origin.origin_uri,
+        None => {
+            tracing::trace!("no match found");
+            return Ok(None);
+        }
     };
 
-    let uri = Uri::try_from(domain)?;
+    tracing::debug!("{} --> {}", &authority, &origin_uri);
+
+    let uri = Uri::try_from(origin_uri)?;
     let parts = uri.into_parts();
     let scheme = parts.scheme.ok_or(anyhow!("Missing scheme: {}", req.uri))?;
     let authority = parts
