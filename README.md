@@ -87,3 +87,16 @@ A naive restart runs the risk that we lose a request. We can use systemd to buff
 - unhealthy destination - This is the most common failure mode. This issue occurs when a request does not respond with a 2xx HTTP response code.
 - invalid request - This occurs when the request does not conform to the destination's specification. The issue may be due to incorrect or mossing data from the HTTP body or the HTTP headers. For example: the request may be missing a `Content-Type: application/json` header or is sending a boolean as a string in the body `{ "active": "true" }` vs `{ "active": true }`. This error may not always be the fault of the origin service. The destination service may be updated in such a way that that past requests were successful, but new requests were not. For example: the destination service did not require a `Content-Type` header but suddenly does. Or the destination service used to accept both `"true"` and `true` but is now suddenly more strict.
 - destination internally drops request - This is one of the more insidious failure modes because it is almost impossible to detect. This occurs when the destination service responds with a 2xx HTTP response code but does not actually process the message. Worse still, this issue is normally discovered days or weeks after it first occurs. The false-positive of a successful request being sent and the delay in detecting this issue makes it one of the more challenging failure modes to resolve.
+
+## License
+
+Licensed under either of
+ * Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE) or http://www.apache.org/licenses/LICENSE-2.0)
+ * MIT license ([LICENSE-MIT](LICENSE-MIT) or http://opensource.org/licenses/MIT)
+at your option.
+
+### Contribution
+
+Unless you explicitly state otherwise, any contribution intentionally submitted
+for inclusion in the work by you, as defined in the Apache-2.0 license, shall be dual licensed as above, without any
+additional terms or conditions.
