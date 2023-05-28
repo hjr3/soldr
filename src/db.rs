@@ -31,6 +31,14 @@ pub struct Request {
     pub complete: bool,
 }
 
+#[derive(Debug, Deserialize, Serialize, sqlx::FromRow)]
+pub struct Attempt {
+    pub id: i64,
+    pub request_id: i64,
+    pub response_status: i64,
+    pub response_body: Vec<u8>,
+}
+
 pub async fn ensure_schema(pool: &SqlitePool) -> Result<()> {
     let mut conn = pool.acquire().await?;
 
@@ -42,7 +50,8 @@ pub async fn ensure_schema(pool: &SqlitePool) -> Result<()> {
              uri TEXT NOT NULL,
              headers TEXT NOT NULL,
              body TEXT,
-             complete INT(1) DEFAULT 0
+             complete INT(1) DEFAULT 0,
+             created_at INTEGER NOT NULL
         )",
     )
     .await?;
@@ -52,22 +61,53 @@ pub async fn ensure_schema(pool: &SqlitePool) -> Result<()> {
         "CREATE TABLE IF NOT EXISTS origins (
              id INTEGER PRIMARY KEY AUTOINCREMENT,
              domain TEXT NOT NULL,
-             origin_uri TEXT NOT NULL
+             origin_uri TEXT NOT NULL,
+             created_at INTEGER NOT NULL,
+             updated_at INTEGER NOT NULL
         )",
     )
     .await?;
 
-    // TODO create table track attempts
+    tracing::trace!("creating attempts table");
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS attempts (
+             id INTEGER PRIMARY KEY AUTOINCREMENT,
+             request_id INTEGER,
+             response_status INTEGER NOT NULL,
+             response_body BLOB NOT NULL,
+             created_at INTEGER NOT NULL
+        )",
+    )
+    .await?;
 
     Ok(())
 }
 
 pub async fn insert_request(pool: &SqlitePool, req: HttpRequest) -> Result<QueuedRequest> {
+    tracing::trace!("insert_request");
     let mut conn = pool.acquire().await?;
 
     let headers_json = serde_json::to_string(&req.headers)?;
 
-    let id = sqlx::query("INSERT INTO requests (method, uri, headers, body) VALUES (?, ?, ?, ?)")
+    let query = r#"
+        INSERT INTO requests
+        (
+            method,
+            uri,
+            headers,
+            body,
+            created_at
+        )
+        VALUES (
+            ?,
+            ?,
+            ?,
+            ?,
+            strftime('%s','now')
+        )
+    "#;
+
+    let id = sqlx::query(query)
         .bind(&req.method)
         .bind(&req.uri)
         .bind(headers_json)
@@ -92,6 +132,7 @@ pub async fn insert_request(pool: &SqlitePool, req: HttpRequest) -> Result<Queue
 }
 
 pub async fn mark_complete(pool: &SqlitePool, req_id: i64) -> Result<()> {
+    tracing::trace!("mark_complete");
     let mut conn = pool.acquire().await?;
 
     sqlx::query("UPDATE requests SET complete = 1 WHERE id = ?")
@@ -103,6 +144,7 @@ pub async fn mark_complete(pool: &SqlitePool, req_id: i64) -> Result<()> {
 }
 
 pub async fn list_requests(pool: &SqlitePool) -> Result<Vec<Request>> {
+    tracing::trace!("list_requests");
     let mut conn = pool.acquire().await?;
 
     let requests = sqlx::query_as::<_, Request>("SELECT * FROM requests LIMIT 10;")
@@ -112,12 +154,85 @@ pub async fn list_requests(pool: &SqlitePool) -> Result<Vec<Request>> {
     Ok(requests)
 }
 
+pub async fn insert_attempt(
+    pool: &SqlitePool,
+    request_id: i64,
+    response_status: i64,
+    response_body: &[u8],
+) -> Result<i64> {
+    tracing::trace!("insert_attempt");
+    let mut conn = pool.acquire().await?;
+
+    let query = r#"
+        INSERT INTO attempts
+        (
+            request_id,
+            response_status,
+            response_body,
+            created_at
+        )
+        VALUES (
+            ?,
+            ?,
+            ?,
+            strftime('%s','now')
+        )
+    "#;
+
+    let id = sqlx::query(query)
+        .bind(request_id)
+        .bind(response_status)
+        .bind(&response_body)
+        .execute(&mut conn)
+        .await
+        .map_err(|err| {
+            tracing::error!(
+                "Failed to save request. {} {} {:?}",
+                request_id,
+                response_status,
+                response_body
+            );
+            err
+        })?
+        .last_insert_rowid();
+
+    Ok(id)
+}
+
+pub async fn list_attempts(pool: &SqlitePool) -> Result<Vec<Attempt>> {
+    tracing::trace!("list_attempts");
+    let mut conn = pool.acquire().await?;
+
+    let attempts = sqlx::query_as::<_, Attempt>("SELECT * FROM attempts;")
+        .fetch_all(&mut conn)
+        .await?;
+
+    Ok(attempts)
+}
+
 // TODO consider a stronger type for origin_uri
 // TOOD change the types so we can avoid String -> str -> String
 pub async fn insert_origin(pool: &SqlitePool, domain: &str, origin_uri: &str) -> Result<Origin> {
+    tracing::trace!("insert_origin");
     let mut conn = pool.acquire().await?;
 
-    let id = sqlx::query("INSERT INTO origins (domain, origin_uri) VALUES (?, ?)")
+    let query = r#"
+        INSERT INTO origins
+        (
+            domain,
+            origin_uri,
+            created_at,
+            updated_at
+        )
+        VALUES (
+            ?,
+            ?,
+            strftime('%s','now'),
+            strftime('%s','now')
+        )
+    "#;
+
+    let id = sqlx::query(query)
         .bind(domain)
         .bind(origin_uri)
         .execute(&mut conn)
@@ -134,6 +249,7 @@ pub async fn insert_origin(pool: &SqlitePool, domain: &str, origin_uri: &str) ->
 
 // TODO cache list of origins and only refresh if origins are modified (created, updated, deleted)
 pub async fn list_origins(pool: &SqlitePool) -> Result<Vec<Origin>> {
+    tracing::trace!("list_origins");
     let mut conn = pool.acquire().await?;
 
     let origins = sqlx::query_as::<_, Origin>("SELECT * FROM origins;")

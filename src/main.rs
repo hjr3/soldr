@@ -220,6 +220,7 @@ mod tests {
 
         // use management API to verify the request is marked complete
         let response = mgmt
+            .clone()
             .oneshot(
                 Request::builder()
                     .method("GET")
@@ -236,6 +237,28 @@ mod tests {
 
         let reqs: Vec<db::Request> = serde_json::from_slice(&body).unwrap();
         assert!(reqs[0].complete);
+
+        // use management API to verify an attempt was made
+        let response = mgmt
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/attempts")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+
+        let body = hyper::body::to_bytes(response.into_body()).await.unwrap();
+
+        let attempts: Vec<db::Attempt> = serde_json::from_slice(&body).unwrap();
+        assert_eq!(attempts[0].id, 1);
+        assert_eq!(attempts[0].request_id, 1);
+        assert_eq!(attempts[0].response_status, 200);
+        assert_eq!(attempts[0].response_body, b"Hello, World!");
     }
 
     #[tokio::test]

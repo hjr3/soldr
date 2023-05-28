@@ -14,8 +14,9 @@ use crate::error::AppError;
 
 pub fn router(pool: SqlitePool) -> Router {
     Router::new()
-        .route("/requests", get(list_requests))
         .route("/origin", post(create_origin))
+        .route("/requests", get(list_requests))
+        .route("/attempts", get(list_attempts))
         .layer(Extension(pool))
 }
 
@@ -29,6 +30,18 @@ async fn list_requests(
     tracing::debug!("response = {:?}", &reqs);
 
     Ok(Json(reqs))
+}
+
+async fn list_attempts(
+    Extension(pool): Extension<SqlitePool>,
+) -> StdResult<Json<Vec<db::Attempt>>, AppError> {
+    let span = tracing::span!(Level::TRACE, "list_attempts");
+    let _enter = span.enter();
+
+    let attempts = db::list_attempts(&pool).await?;
+    tracing::debug!("response = {:?}", &attempts);
+
+    Ok(Json(attempts))
 }
 
 #[derive(Debug, Deserialize, Serialize)]

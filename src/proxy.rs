@@ -3,8 +3,10 @@ use axum::http::Request;
 use axum::http::Uri;
 use hyper::client::HttpConnector;
 use hyper::Body;
+use hyper::Response;
 use sqlx::SqlitePool;
 
+use crate::db::insert_attempt;
 use crate::db::list_origins;
 use crate::db::QueuedRequest;
 
@@ -35,6 +37,9 @@ pub async fn proxy(pool: &SqlitePool, client: &Client, mut req: QueuedRequest) -
         &uri,
         response.status()
     );
+
+    let attempt_id = record_attempt(pool, req.id, response).await?;
+    tracing::debug!("Recorded attempt {} for request {}", attempt_id, &req.id,);
 
     Ok(())
 }
@@ -96,4 +101,18 @@ async fn map_origin(pool: &SqlitePool, req: &QueuedRequest) -> Result<Option<Uri
         .build()?;
 
     Ok(Some(uri))
+}
+
+async fn record_attempt(
+    pool: &SqlitePool,
+    request_id: i64,
+    attempt_req: Response<Body>,
+) -> Result<i64> {
+    let response_status = attempt_req.status().as_u16() as i64;
+    let response_body = attempt_req.into_body();
+    let response_body = hyper::body::to_bytes(response_body).await?;
+
+    let attempt_id = insert_attempt(pool, request_id, response_status, &response_body).await?;
+
+    Ok(attempt_id)
 }
