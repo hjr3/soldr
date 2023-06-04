@@ -21,6 +21,14 @@ pub struct QueuedRequest {
     pub body: Option<Vec<u8>>,
 }
 
+#[derive(Debug, Deserialize, Serialize, sqlx::Type, Eq, PartialEq)]
+#[repr(i8)]
+pub enum RequestState {
+    Pending = 0,
+    Complete = 1,
+    Error = 2,
+}
+
 #[derive(Debug, Deserialize, Serialize, sqlx::FromRow)]
 pub struct Request {
     pub id: i64,
@@ -28,7 +36,7 @@ pub struct Request {
     pub uri: String,
     pub headers: String,
     pub body: Option<Vec<u8>>,
-    pub complete: bool,
+    pub state: RequestState,
 }
 
 #[derive(Debug, Deserialize, Serialize, sqlx::FromRow)]
@@ -43,6 +51,10 @@ pub async fn ensure_schema(pool: &SqlitePool) -> Result<()> {
     let mut conn = pool.acquire().await?;
 
     tracing::trace!("creating requests table");
+    // States
+    //  0 - pending
+    //  1 - complete
+    //  2 - error
     conn.execute(
         "CREATE TABLE IF NOT EXISTS requests (
              id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -50,7 +62,7 @@ pub async fn ensure_schema(pool: &SqlitePool) -> Result<()> {
              uri TEXT NOT NULL,
              headers TEXT NOT NULL,
              body TEXT,
-             complete INT(1) DEFAULT 0,
+             state INT(1) DEFAULT 0,
              created_at INTEGER NOT NULL
         )",
     )
@@ -135,7 +147,19 @@ pub async fn mark_complete(pool: &SqlitePool, req_id: i64) -> Result<()> {
     tracing::trace!("mark_complete");
     let mut conn = pool.acquire().await?;
 
-    sqlx::query("UPDATE requests SET complete = 1 WHERE id = ?")
+    sqlx::query("UPDATE requests SET state = 1 WHERE id = ?")
+        .bind(req_id)
+        .execute(&mut conn)
+        .await?;
+
+    Ok(())
+}
+
+pub async fn mark_error(pool: &SqlitePool, req_id: i64) -> Result<()> {
+    tracing::trace!("mark_error");
+    let mut conn = pool.acquire().await?;
+
+    sqlx::query("UPDATE requests SET state = 2 WHERE id = ?")
         .bind(req_id)
         .execute(&mut conn)
         .await?;

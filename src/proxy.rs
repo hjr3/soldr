@@ -12,12 +12,12 @@ use crate::db::QueuedRequest;
 
 pub type Client = hyper::client::Client<HttpConnector, Body>;
 
-pub async fn proxy(pool: &SqlitePool, client: &Client, mut req: QueuedRequest) -> Result<()> {
+pub async fn proxy(pool: &SqlitePool, client: &Client, mut req: QueuedRequest) -> Result<bool> {
     let uri = map_origin(pool, &req).await?;
 
     if uri.is_none() {
         // no origin found, so mark as complete and move on
-        return Ok(());
+        return Ok(true);
     }
 
     let uri = uri.unwrap();
@@ -38,15 +38,20 @@ pub async fn proxy(pool: &SqlitePool, client: &Client, mut req: QueuedRequest) -
         response.status()
     );
 
+    let is_success = response.status().is_success();
     let attempt_id = record_attempt(pool, req.id, response).await?;
     tracing::debug!("Recorded attempt {} for request {}", attempt_id, &req.id,);
 
-    Ok(())
+    Ok(is_success)
 }
 
 async fn map_origin(pool: &SqlitePool, req: &QueuedRequest) -> Result<Option<Uri>> {
     let uri = Uri::try_from(&req.uri)?;
     let parts = uri.into_parts();
+
+    let path_and_query = parts
+        .path_and_query
+        .ok_or(anyhow!("Missing path and query: {}", req.uri))?;
 
     let authority = if parts.authority.is_some() {
         parts.authority.unwrap()
@@ -84,15 +89,9 @@ async fn map_origin(pool: &SqlitePool, req: &QueuedRequest) -> Result<Option<Uri
     tracing::debug!("{} --> {}", &authority, &origin_uri);
 
     let uri = Uri::try_from(origin_uri)?;
-    let parts = uri.into_parts();
-    let scheme = parts.scheme.ok_or(anyhow!("Missing scheme: {}", req.uri))?;
-    let authority = parts
-        .authority
-        .ok_or(anyhow!("Missing authority: {}", req.uri))?;
-
-    let path_and_query = parts
-        .path_and_query
-        .ok_or(anyhow!("Missing path and query: {}", req.uri))?;
+    let origin_parts = uri.into_parts();
+    let scheme = origin_parts.scheme.ok_or(anyhow!("Missing scheme"))?;
+    let authority = origin_parts.authority.ok_or(anyhow!("Missing authority"))?;
 
     let uri = Uri::builder()
         .scheme(scheme)

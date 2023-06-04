@@ -17,7 +17,7 @@ use hyper::HeaderMap;
 use sqlx::sqlite::SqlitePool;
 use tracing::Level;
 
-use crate::db::{ensure_schema, insert_request, mark_complete};
+use crate::db::{ensure_schema, insert_request, mark_complete, mark_error};
 use crate::error::AppError;
 use crate::ingest::HttpRequest;
 use crate::proxy::{proxy, Client};
@@ -32,6 +32,7 @@ pub async fn app() -> Result<(Router, Router)> {
     let client = Client::new();
     let router = Router::new()
         .route("/", post(handler))
+        .route("/*path", post(handler))
         .layer(Extension(pool))
         .with_state(client);
 
@@ -63,9 +64,13 @@ async fn handler(
     let queued_req = insert_request(&pool, r).await?;
     let req_id = queued_req.id;
 
-    proxy(&pool, &client, queued_req).await?;
+    let is_success = proxy(&pool, &client, queued_req).await?;
 
-    mark_complete(&pool, req_id).await?;
+    if is_success {
+        mark_complete(&pool, req_id).await?;
+    } else {
+        mark_error(&pool, req_id).await?;
+    }
 
     Ok(StatusCode::NO_CONTENT)
 }

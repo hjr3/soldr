@@ -8,6 +8,7 @@ use axum::extract::State;
 use axum::http::Request;
 use axum::http::StatusCode;
 use axum::{routing::post, Router};
+use soldr::db::RequestState;
 use tokio::sync::Mutex;
 use tower::util::ServiceExt;
 
@@ -16,7 +17,7 @@ use soldr::{app, db};
 
 type Sentinel = Arc<Mutex<Option<Request<Body>>>>;
 
-async fn handler(
+async fn success_handler(
     State(sentinal): State<Sentinel>,
     req: Request<Body>,
 ) -> impl axum::response::IntoResponse {
@@ -25,15 +26,21 @@ async fn handler(
     "Hello, World!"
 }
 
+async fn failure_handler() -> impl axum::response::IntoResponse {
+    (
+        StatusCode::INTERNAL_SERVER_ERROR,
+        "unexpected error".to_string(),
+    )
+}
+
 #[tokio::test]
 async fn ingest_save_and_proxy() {
-    common::enable_tracing();
-
     // set up origin server
-    let listener = TcpListener::bind("0.0.0.0:3001".parse::<SocketAddr>().unwrap()).unwrap();
+    let listener = TcpListener::bind("0.0.0.0:0".parse::<SocketAddr>().unwrap()).unwrap();
+    let port = listener.local_addr().unwrap().port();
     let sentinel: Sentinel = Arc::new(Mutex::new(None));
     let s2 = sentinel.clone();
-    let client_app = Router::new().route("/", post(handler).with_state(s2));
+    let client_app = Router::new().route("/", post(success_handler).with_state(s2));
 
     tokio::spawn(async move {
         axum::Server::from_tcp(listener)
@@ -49,7 +56,7 @@ async fn ingest_save_and_proxy() {
     let domain = "example.wh.soldr.dev";
     let create_origin = CreateOrigin {
         domain: domain.to_string(),
-        origin_uri: "http://localhost:3001".to_string(),
+        origin_uri: format!("http://localhost:{}", port),
     };
     let body = serde_json::to_string(&create_origin).unwrap();
     let response = mgmt
@@ -104,7 +111,7 @@ async fn ingest_save_and_proxy() {
     let body = hyper::body::to_bytes(response.into_body()).await.unwrap();
 
     let reqs: Vec<db::Request> = serde_json::from_slice(&body).unwrap();
-    assert!(reqs[0].complete);
+    assert_eq!(reqs[0].state, RequestState::Complete);
 
     // use management API to verify an attempt was made
     let response = mgmt
@@ -130,36 +137,33 @@ async fn ingest_save_and_proxy() {
 }
 
 #[tokio::test]
-async fn mgmt_list_requests() {
-    let (_, mgmt) = app().await.unwrap();
+async fn ingest_proxy_error() {
+    common::enable_tracing();
 
-    let response = mgmt
-        .oneshot(
-            Request::builder()
-                .method("GET")
-                .uri("/requests")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
+    // set up origin server
+    let listener = TcpListener::bind("0.0.0.0:0".parse::<SocketAddr>().unwrap()).unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let client_app = Router::new().route("/failure", post(failure_handler));
 
-    assert_eq!(response.status(), StatusCode::OK);
+    tokio::spawn(async move {
+        axum::Server::from_tcp(listener)
+            .unwrap()
+            .serve(client_app.into_make_service())
+            .await
+            .unwrap();
+    });
 
-    let body = hyper::body::to_bytes(response.into_body()).await.unwrap();
-    assert_eq!(&body[..], b"[]");
-}
+    let (ingest, mgmt) = app().await.unwrap();
 
-#[tokio::test]
-async fn mgmt_create_origin() {
-    let (_, mgmt) = app().await.unwrap();
-
+    // create an origin mapping
+    let domain = "example.wh.soldr.dev";
     let create_origin = CreateOrigin {
-        domain: "example.wh.soldr.dev".to_string(),
-        origin_uri: "https://www.example.com".to_string(),
+        domain: domain.to_string(),
+        origin_uri: format!("http://localhost:{}", port),
     };
     let body = serde_json::to_string(&create_origin).unwrap();
     let response = mgmt
+        .clone()
         .oneshot(
             Request::builder()
                 .method("POST")
@@ -173,9 +177,62 @@ async fn mgmt_create_origin() {
 
     assert_eq!(response.status(), StatusCode::OK);
 
+    // send a webhook request
+    // `Router` implements `tower::Service<Request<Body>>` so we can
+    // call it like any tower service, no need to run an HTTP server.
+    let response = ingest
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/failure")
+                .header("Host", domain)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::NO_CONTENT);
+
+    // use management API to verify the request is marked complete
+    let response = mgmt
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/requests")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+
     let body = hyper::body::to_bytes(response.into_body()).await.unwrap();
-    let origin: db::Origin = serde_json::from_slice(&body).unwrap();
-    assert_eq!(origin.id, 1);
-    assert_eq!(origin.domain, create_origin.domain);
-    assert_eq!(origin.origin_uri, create_origin.origin_uri);
+
+    let reqs: Vec<db::Request> = serde_json::from_slice(&body).unwrap();
+    assert_eq!(reqs[0].state, RequestState::Error);
+
+    // use management API to verify an attempt was made
+    let response = mgmt
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/attempts")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let body = hyper::body::to_bytes(response.into_body()).await.unwrap();
+
+    let attempts: Vec<db::Attempt> = serde_json::from_slice(&body).unwrap();
+    assert_eq!(attempts[0].id, 1);
+    assert_eq!(attempts[0].request_id, 1);
+    assert_eq!(attempts[0].response_status, 500);
+    assert_eq!(attempts[0].response_body, b"unexpected error");
 }
