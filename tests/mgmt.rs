@@ -8,7 +8,7 @@ use soldr::{app, db};
 
 #[tokio::test]
 async fn mgmt_list_requests() {
-    let (_, mgmt) = app().await.unwrap();
+    let (_, mgmt, _) = app().await.unwrap();
 
     let response = mgmt
         .oneshot(
@@ -29,7 +29,7 @@ async fn mgmt_list_requests() {
 
 #[tokio::test]
 async fn mgmt_create_origin() {
-    let (_, mgmt) = app().await.unwrap();
+    let (_, mgmt, _) = app().await.unwrap();
 
     let create_origin = CreateOrigin {
         domain: "example.wh.soldr.dev".to_string(),
@@ -40,7 +40,7 @@ async fn mgmt_create_origin() {
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri("/origin")
+                .uri("/origins")
                 .header("Content-Type", "application/json")
                 .body(body.into())
                 .unwrap(),

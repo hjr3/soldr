@@ -167,6 +167,41 @@ pub async fn mark_error(pool: &SqlitePool, req_id: i64) -> Result<()> {
     Ok(())
 }
 
+pub async fn list_failed_requests(pool: &SqlitePool) -> Result<Vec<QueuedRequest>> {
+    tracing::trace!("list_failed_requests");
+    let mut conn = pool.acquire().await?;
+
+    let query = r#"
+    SELECT *
+    FROM requests
+    WHERE state = 2
+        AND id IN (
+            SELECT request_id
+            FROM attempts
+            GROUP BY request_id
+            ORDER BY created_at
+            LIMIT 10
+        );
+    "#;
+
+    let requests = sqlx::query_as::<_, Request>(query)
+        .fetch_all(&mut conn)
+        .await?;
+
+    let queued_requests = requests
+        .into_iter()
+        .map(|request| QueuedRequest {
+            id: request.id,
+            method: request.method,
+            uri: request.uri,
+            headers: serde_json::from_str(&request.headers).unwrap(),
+            body: request.body,
+        })
+        .collect();
+
+    Ok(queued_requests)
+}
+
 pub async fn list_requests(pool: &SqlitePool) -> Result<Vec<Request>> {
     tracing::trace!("list_requests");
     let mut conn = pool.acquire().await?;
@@ -227,7 +262,7 @@ pub async fn list_attempts(pool: &SqlitePool) -> Result<Vec<Attempt>> {
     tracing::trace!("list_attempts");
     let mut conn = pool.acquire().await?;
 
-    let attempts = sqlx::query_as::<_, Attempt>("SELECT * FROM attempts;")
+    let attempts = sqlx::query_as::<_, Attempt>("SELECT * FROM attempts ORDER BY id DESC;")
         .fetch_all(&mut conn)
         .await?;
 

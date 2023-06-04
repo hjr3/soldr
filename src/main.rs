@@ -1,4 +1,7 @@
+use std::time::Duration;
+
 use anyhow::Result;
+use tokio::time;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 #[tokio::main]
@@ -11,7 +14,7 @@ async fn main() -> Result<()> {
         .with(tracing_subscriber::fmt::layer())
         .init();
 
-    let (ingest, mgmt) = soldr::app().await?;
+    let (ingest, mgmt, pool) = soldr::app().await?;
 
     let addr = "0.0.0.0:3443";
     let addr = addr.parse()?;
@@ -21,6 +24,18 @@ async fn main() -> Result<()> {
             .serve(mgmt.into_make_service())
             .await
             .unwrap();
+    });
+
+    tokio::spawn(async move {
+        tracing::info!("starting retry queue");
+        let mut interval = time::interval(Duration::from_secs(60));
+
+        loop {
+            interval.tick().await;
+            let pool2 = pool.clone();
+            tracing::trace!("retrying failed requests");
+            soldr::queue::tick(pool2).await;
+        }
     });
 
     let addr = "0.0.0.0:3000";

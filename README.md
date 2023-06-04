@@ -2,6 +2,38 @@
 
 A webhook delivery network
 
+## Basic Example
+
+Start the provided origin server: `cargo run --example origin`
+
+In a separate terminal window, start soldr: `RUST_LOG=soldr=trace cargo run`
+
+In a separate terminal window, run the following curl requests:
+
+Map an origin:
+
+```
+curl -vvv -H "Content-Type: application/json" localhost:3443/origins \
+-d '{ "domain": "example.wh.soldr.dev", "origin_uri": "http://localhost:8080" }'
+```
+
+Send a request that will succeed:
+
+```
+curl -vvv -H "Host: example.wh.soldr.dev" localhost:3000/ -d ''
+```
+
+Send a request that will failure:
+
+```
+curl -vvv -H "Host: example.wh.soldr.dev" localhost:3000/failure -d ''
+```
+
+This request will be retried repeatedly by the retry queue.
+
+
+In the terminal window running soldr, you will see a lot of tracing output that demonstrates how soldr is running.
+
 ## Architecture
 
 The goal is to have a single process that people can easily get running.

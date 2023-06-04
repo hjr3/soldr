@@ -14,7 +14,7 @@ use crate::error::AppError;
 
 pub fn router(pool: SqlitePool) -> Router {
     Router::new()
-        .route("/origin", post(create_origin))
+        .route("/origins", post(create_origin))
         .route("/requests", get(list_requests))
         .route("/attempts", get(list_attempts))
         .layer(Extension(pool))

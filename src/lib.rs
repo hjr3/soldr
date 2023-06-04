@@ -3,6 +3,7 @@ pub mod error;
 pub mod ingest;
 pub mod mgmt;
 pub mod proxy;
+pub mod queue;
 
 use std::result::Result as StdResult;
 
@@ -22,9 +23,10 @@ use crate::error::AppError;
 use crate::ingest::HttpRequest;
 use crate::proxy::{proxy, Client};
 
-pub async fn app() -> Result<(Router, Router)> {
+pub async fn app() -> Result<(Router, Router, SqlitePool)> {
     // TODO write to actual database, such as sqlite:soldr.db
     let pool = SqlitePool::connect("sqlite::memory:").await?;
+    let pool2 = pool.clone();
     ensure_schema(&pool).await?;
 
     let mgmt_router = mgmt::router(pool.clone());
@@ -36,7 +38,7 @@ pub async fn app() -> Result<(Router, Router)> {
         .layer(Extension(pool))
         .with_state(client);
 
-    Ok((router, mgmt_router))
+    Ok((router, mgmt_router, pool2))
 }
 
 async fn handler(
