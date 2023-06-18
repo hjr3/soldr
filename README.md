@@ -1,11 +1,16 @@
 # soldr
 
-Soldr is a layer 7 (HTTP) proxy designed to provide resiliency to webbook requests. Soldr can be used as a foward proxy or a reverse proxy.
+Soldr is a layer 7 (HTTP) proxy designed to provide resiliency to webbook requests.
 
-Soldr includes functionality to improve the resiliency of outgoing webhook requests, including:
+> ***Note***
+> Soldr is still under active development.
+
+Soldr includes functionality to improve the resiliency of webhook requests, including:
 - retrying requests that fail.
 - sending alerts for requests that fail a certain number of retries.
 - editing of the request headers and body.
+
+Soldr can be used as a foward proxy to add resiliency to the client sending webhook requests or a reverse proxy to add resiliency to the origin receiving the webhook request.
 
 ## Forward Proxy
 Clients that send web requests directly to an origin can instead send the requests to soldr. Soldr will log the request and send it to the origin.
@@ -86,6 +91,10 @@ This request will be retried repeatedly by the retry queue.
 
 
 In the terminal window running soldr, you will see a lot of tracing output that demonstrates how soldr is running.
+
+## Design
+
+Soldr is designed to be used with webhooks that pass messages to an origin and only except acknowledgement of the request. [Shopify Webhook](https://shopify.dev/docs/apps/webhooks) are a good example of these types of webhooks. Webhooks that except a response body based on the request payload are not a good fit for Soldr. [Dialogflow CX Webhooks](https://cloud.google.com/dialogflow/cx/docs/concept/webhook) are an example of the types of webhook implementations that soldr is not designed to support.
 
 ## License
 
