@@ -5,12 +5,15 @@ use hyper::client::HttpConnector;
 use hyper::Body;
 use hyper::Response;
 use sqlx::SqlitePool;
+use tokio::time::{timeout, Duration};
 
 use crate::db::insert_attempt;
 use crate::db::list_origins;
 use crate::db::QueuedRequest;
 
 pub type Client = hyper::client::Client<HttpConnector, Body>;
+
+const TIMEOUT_DURATION: u64 = 5;
 
 pub async fn proxy(pool: &SqlitePool, client: &Client, mut req: QueuedRequest) -> Result<bool> {
     let uri = map_origin(pool, &req).await?;
@@ -30,7 +33,12 @@ pub async fn proxy(pool: &SqlitePool, client: &Client, mut req: QueuedRequest) -
         .uri(&uri)
         .body(body)?;
 
-    let response = client.request(new_req).await?;
+    let response = timeout(
+        Duration::from_secs(TIMEOUT_DURATION),
+        client.request(new_req),
+    )
+    .await??;
+
     tracing::debug!(
         "Proxy {:?} --> {} with {} response",
         &req,
