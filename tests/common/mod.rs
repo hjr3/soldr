@@ -2,6 +2,8 @@ use std::sync::Once;
 
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
+use soldr::Config;
+
 static TRACING_INITIALIZED: Once = Once::new();
 
 // Help function to add tracing to tests
@@ -18,4 +20,10 @@ pub fn enable_tracing() {
             .with(tracing_subscriber::fmt::layer())
             .init();
     });
+}
+
+pub fn config() -> Config {
+    Config {
+        database_url: "sqlite::memory:".to_string(),
+    }
 }

@@ -1,3 +1,5 @@
+mod common;
+
 use axum::body::Body;
 use axum::http::Request;
 use axum::http::StatusCode;
@@ -8,7 +10,7 @@ use soldr::{app, db};
 
 #[tokio::test]
 async fn mgmt_list_requests() {
-    let (_, mgmt, _) = app().await.unwrap();
+    let (_, mgmt, _) = app(common::config()).await.unwrap();
 
     let response = mgmt
         .oneshot(
@@ -29,7 +31,7 @@ async fn mgmt_list_requests() {
 
 #[tokio::test]
 async fn mgmt_create_origin() {
-    let (_, mgmt, _) = app().await.unwrap();
+    let (_, mgmt, _) = app(common::config()).await.unwrap();
 
     let create_origin = CreateOrigin {
         domain: "example.wh.soldr.dev".to_string(),
