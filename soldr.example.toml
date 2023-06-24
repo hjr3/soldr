@@ -1,1 +1,1 @@
-database_url = "sqlite::memory:"
+database_url = "sqlite:soldr.db?mode=rwc"
