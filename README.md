@@ -98,10 +98,15 @@ Soldr is designed to be used with webhooks that pass messages to an origin and o
 
 ## License
 
-Licensed under either of
- * Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE) or http://www.apache.org/licenses/LICENSE-2.0)
- * MIT license ([LICENSE-MIT](LICENSE-MIT) or http://opensource.org/licenses/MIT)
-at your option.
+Soldr is licensed under the [Elastic License 2.0 (ELv2)](https://github.com/hjr3/soldr/blob/master/LICENSE.md) license because it provides the best balance between freedom and protection. The ELv2 license is a permissive license that allows you to use, modify, and distribute soldr as long as you follow a few simple rules:
+
+1. **You may not provide soldr's API to others as a managed service.** For example, you _cannot_ host soldr yourself and sell it as a cloud-based licensing service. However, you _can_ sell a product that directly exposes and utilizes soldr's API, as long as soldr cannot be used outside of your product for other purposes.
+
+1. **You may not circumvent the license key functionality or remove/obscure features protected by license keys.** You _cannot_ remove or change the licensing code to, for example, unlock a paid/enterprise feature.
+
+1. You may not alter, remove, or obscure any licensing, copyright, or other notices.
+
+Anything else is fair game. There's no clause that requires you to open source modifications made to soldr or other derivative works. You can fork soldr and go closed-source.
 
 ### Contribution
 
