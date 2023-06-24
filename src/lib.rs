@@ -15,6 +15,7 @@ use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::{routing::post, Router};
 use hyper::HeaderMap;
+use serde::Deserialize;
 use sqlx::sqlite::SqlitePool;
 use tracing::Level;
 
@@ -23,9 +24,23 @@ use crate::error::AppError;
 use crate::ingest::HttpRequest;
 use crate::proxy::{proxy, Client};
 
-pub async fn app() -> Result<(Router, Router, SqlitePool)> {
-    // TODO write to actual database, such as sqlite:soldr.db
-    let pool = SqlitePool::connect("sqlite::memory:").await?;
+#[derive(Debug, Deserialize)]
+pub struct Config {
+    pub database_url: String,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            // TODO change to a file location
+            // maybe $XDG_DATA_DIR ?
+            database_url: "sqlite::memory:".to_string(),
+        }
+    }
+}
+
+pub async fn app(config: Config) -> Result<(Router, Router, SqlitePool)> {
+    let pool = SqlitePool::connect(&config.database_url).await?;
     let pool2 = pool.clone();
     ensure_schema(&pool).await?;
 

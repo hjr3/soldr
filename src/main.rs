@@ -1,8 +1,16 @@
 use std::time::Duration;
 
 use anyhow::Result;
+use clap::Parser;
 use tokio::time;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+
+#[derive(Parser, Debug)]
+#[command(author, version, about, long_about = None)]
+struct Args {
+    #[arg(short, long)]
+    config_path: Option<String>,
+}
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -14,7 +22,13 @@ async fn main() -> Result<()> {
         .with(tracing_subscriber::fmt::layer())
         .init();
 
-    let (ingest, mgmt, pool) = soldr::app().await?;
+    let args = Args::parse();
+    let config = match args.config_path {
+        Some(path) => read_config(&path)?,
+        None => soldr::Config::default(),
+    };
+
+    let (ingest, mgmt, pool) = soldr::app(config).await?;
 
     let addr = "0.0.0.0:3443";
     let addr = addr.parse()?;
@@ -45,4 +59,9 @@ async fn main() -> Result<()> {
         .await?;
 
     Ok(())
+}
+
+fn read_config(config_path: &str) -> Result<soldr::Config> {
+    let content = std::fs::read_to_string(config_path)?;
+    Ok(toml::from_str(&content)?)
 }
