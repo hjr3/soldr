@@ -36,7 +36,7 @@ async fn queue_retry_request() {
             .unwrap();
     });
 
-    let (ingest, mgmt, pool) = app(common::config()).await.unwrap();
+    let (ingest, mgmt, pool, _, _) = app(common::config()).await.unwrap();
 
     // create an origin mapping
     let domain = "example.wh.soldr.dev";

@@ -28,16 +28,16 @@ async fn main() -> Result<()> {
         None => soldr::Config::default(),
     };
 
-    let (ingest, mgmt, pool) = soldr::app(config).await?;
+    let (ingest, mgmt, pool, mgmt_listener, ingest_listner) = soldr::app(config).await?;
 
-    let addr = "0.0.0.0:3443";
-    let addr = addr.parse()?;
     tokio::spawn(async move {
-        tracing::info!("management API listening on {}", addr);
-        axum::Server::bind(&addr)
+        tracing::info!("management API listening on {}", mgmt_listener);
+        if let Err(err) = axum::Server::bind(&mgmt_listener)
             .serve(mgmt.into_make_service())
             .await
-            .unwrap();
+        {
+            eprintln!("Failed to start management API server: {}", err);
+        }
     });
 
     tokio::spawn(async move {
@@ -52,9 +52,8 @@ async fn main() -> Result<()> {
         }
     });
 
-    let addr = "0.0.0.0:3000";
-    tracing::info!("ingest listening on {}", addr);
-    axum::Server::bind(&addr.parse()?)
+    tracing::info!("ingest listening on {}", ingest_listner);
+    axum::Server::bind(&ingest_listner)
         .serve(ingest.into_make_service())
         .await?;
 
