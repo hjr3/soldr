@@ -17,7 +17,6 @@ use axum::{routing::post, Router};
 use hyper::HeaderMap;
 use serde::Deserialize;
 use sqlx::sqlite::SqlitePool;
-use tracing::Level;
 
 use crate::db::{ensure_schema, insert_request, mark_complete, mark_error};
 use crate::error::AppError;
@@ -56,14 +55,12 @@ pub async fn app(config: Config) -> Result<(Router, Router, SqlitePool)> {
     Ok((router, mgmt_router, pool2))
 }
 
+#[tracing::instrument(level = "trace", "ingest", skip_all)]
 async fn handler(
     State(client): State<Client>,
     Extension(pool): Extension<SqlitePool>,
     req: Request<Body>,
 ) -> StdResult<impl IntoResponse, AppError> {
-    let span = tracing::span!(Level::TRACE, "ingest");
-    let _enter = span.enter();
-
     let method = req.method().to_string();
     let uri = req.uri().to_string();
     let headers = transform_headers(req.headers());
