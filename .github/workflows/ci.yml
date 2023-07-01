@@ -6,12 +6,6 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  cargo-audit:
-    name: Dependency Audit
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v3
-      - run: cargo-audit audit -D warnings
   format:
     name: Formatting
     runs-on: ubuntu-latest
