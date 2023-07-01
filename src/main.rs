@@ -28,7 +28,10 @@ async fn main() -> Result<()> {
         None => soldr::Config::default(),
     };
 
-    let (ingest, mgmt, pool, mgmt_listener, ingest_listner) = soldr::app(config).await?;
+    let (ingest, mgmt, pool) = soldr::app(&config).await?;
+
+    let mgmt_listener = config.management_listener.parse()?;
+    let ingest_listener = config.ingest_listener.parse()?;
 
     tokio::spawn(async move {
         tracing::info!("management API listening on {}", mgmt_listener);
@@ -52,8 +55,8 @@ async fn main() -> Result<()> {
         }
     });
 
-    tracing::info!("ingest listening on {}", ingest_listner);
-    axum::Server::bind(&ingest_listner)
+    tracing::info!("ingest listening on {}", ingest_listener);
+    axum::Server::bind(&ingest_listener)
         .serve(ingest.into_make_service())
         .await?;
 
