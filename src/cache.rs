@@ -1,29 +1,47 @@
-use crate::db::{list_origins, Origin};
+use crate::db::Origin;
 use parking_lot::RwLock;
-use sqlx::SqlitePool;
 use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::error::AppError;
 
 #[derive(Debug)]
-pub struct OriginCache {
-    origins: Arc<RwLock<HashMap<String, Origin>>>,
-    pool: Arc<SqlitePool>,
-}
+pub struct OriginCache(pub(crate) Arc<OriginCacheInner>);
 
 impl OriginCache {
-    pub fn new(pool: Arc<SqlitePool>) -> Self {
-        OriginCache {
+    pub fn new() -> Self {
+        let inner = OriginCacheInner::new();
+        Self(Arc::new(inner))
+    }
+
+    pub fn refresh(&self, new_origins: Vec<Origin>) -> Result<(), AppError> {
+        self.0.refresh(new_origins)
+    }
+
+    pub fn get(&self, domain: &str) -> Option<Origin> {
+        self.0.get(domain)
+    }
+}
+
+impl Clone for OriginCache {
+    fn clone(&self) -> Self {
+        Self(Arc::clone(&self.0))
+    }
+}
+
+#[derive(Debug)]
+pub struct OriginCacheInner {
+    origins: Arc<RwLock<HashMap<String, Origin>>>,
+}
+
+impl OriginCacheInner {
+    pub fn new() -> Self {
+        Self {
             origins: Arc::new(RwLock::new(HashMap::new())),
-            pool,
         }
     }
 
-    pub async fn refresh(&self) -> Result<(), AppError> {
-        // Fetch the latest origin data from the database using the provided SqlitePool
-        let new_origins = list_origins(&self.pool).await?;
-
+    pub fn refresh(&self, new_origins: Vec<Origin>) -> Result<(), AppError> {
         // Create a new HashMap to store the updated origin data
         let mut map = HashMap::new();
 
@@ -37,8 +55,8 @@ impl OriginCache {
         Ok(())
     }
 
-    pub async fn get(&self, domain: &str) -> Option<Origin> {
-        tracing::info!("Get called on cache for domain: {}", domain);
+    pub fn get(&self, domain: &str) -> Option<Origin> {
+        tracing::info!("Got called on cache for domain: {}", domain);
         let origins = self.origins.read();
 
         // Look up domain in the cache and clone if found

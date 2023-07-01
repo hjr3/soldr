@@ -9,15 +9,17 @@ use serde::{Deserialize, Serialize};
 use sqlx::sqlite::SqlitePool;
 use tracing::Level;
 
+use crate::cache::OriginCache;
 use crate::db;
 use crate::error::AppError;
 
-pub fn router(pool: SqlitePool) -> Router {
+pub fn router(pool: SqlitePool, origin_cache: OriginCache) -> Router {
     Router::new()
         .route("/origins", post(create_origin))
         .route("/requests", get(list_requests))
         .route("/attempts", get(list_attempts))
         .layer(Extension(pool))
+        .layer(Extension(origin_cache))
 }
 
 async fn list_requests(
@@ -52,6 +54,7 @@ pub struct CreateOrigin {
 
 async fn create_origin(
     Extension(pool): Extension<SqlitePool>,
+    Extension(origin_cache): Extension<OriginCache>,
     Json(payload): Json<CreateOrigin>,
 ) -> StdResult<Json<db::Origin>, AppError> {
     let span = tracing::span!(Level::TRACE, "create_origin");
@@ -60,6 +63,9 @@ async fn create_origin(
     tracing::debug!("request payload = {:?}", &payload);
     let origin = db::insert_origin(&pool, &payload.domain, &payload.origin_uri).await?;
     tracing::debug!("response = {:?}", &origin);
+
+    let origins = db::list_origins(&pool).await?;
+    origin_cache.refresh(origins).unwrap();
 
     Ok(Json(origin))
 }

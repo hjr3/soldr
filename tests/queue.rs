@@ -36,7 +36,7 @@ async fn queue_retry_request() {
             .unwrap();
     });
 
-    let (ingest, mgmt, pool) = app(&common::config()).await.unwrap();
+    let (ingest, mgmt, retry_queue) = app(common::config()).await.unwrap();
 
     // create an origin mapping
     let domain = "example.wh.soldr.dev";
@@ -120,7 +120,7 @@ async fn queue_retry_request() {
     assert_eq!(attempts[0].response_status, 500);
     assert_eq!(attempts[0].response_body, b"unexpected error");
 
-    soldr::queue::tick(pool).await;
+    retry_queue.tick().await;
 
     // use management API to verify an attempt was made
     let response = mgmt

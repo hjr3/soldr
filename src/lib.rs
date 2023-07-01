@@ -16,9 +16,11 @@ use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::{routing::post, Router};
 use hyper::HeaderMap;
+use queue::RetryQueue;
 use serde::Deserialize;
 use sqlx::sqlite::SqlitePool;
 
+use crate::cache::OriginCache;
 use crate::db::{ensure_schema, insert_request, mark_complete, mark_error};
 use crate::error::AppError;
 use crate::ingest::HttpRequest;
@@ -44,28 +46,32 @@ impl Default for Config {
     }
 }
 
-pub async fn app(config: &Config) -> Result<(Router, Router, SqlitePool)> {
+pub async fn app(config: &Config) -> Result<(Router, Router, RetryQueue)> {
     let pool = SqlitePool::connect(&config.database_url).await?;
-    let pool2 = pool.clone();
-
     ensure_schema(&pool).await?;
 
-    let mgmt_router = mgmt::router(pool.clone());
+    let origin_cache = OriginCache::new();
+
+    let mgmt_router = mgmt::router(pool.clone(), origin_cache.clone());
 
     let client = Client::new();
     let router = Router::new()
         .route("/", post(handler))
         .route("/*path", post(handler))
-        .layer(Extension(pool))
+        .layer(Extension(pool.clone()))
+        .layer(Extension(origin_cache.clone()))
         .with_state(client);
 
-    Ok((router, mgmt_router, pool2))
+    let retry_queue = RetryQueue::new(pool, origin_cache);
+
+    Ok((router, mgmt_router, retry_queue))
 }
 
 #[tracing::instrument(level = "trace", "ingest", skip_all)]
 async fn handler(
     State(client): State<Client>,
     Extension(pool): Extension<SqlitePool>,
+    Extension(origin_cache): Extension<OriginCache>,
     req: Request<Body>,
 ) -> StdResult<impl IntoResponse, AppError> {
     let method = req.method().to_string();
@@ -85,7 +91,7 @@ async fn handler(
     let queued_req = insert_request(&pool, r).await?;
     let req_id = queued_req.id;
 
-    let is_success = proxy(&pool, &client, queued_req).await?;
+    let is_success = proxy(&pool, &origin_cache, &client, queued_req).await?;
 
     if is_success {
         mark_complete(&pool, req_id).await?;

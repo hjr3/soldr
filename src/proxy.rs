@@ -5,7 +5,6 @@ use hyper::client::HttpConnector;
 use hyper::Body;
 use hyper::Response;
 use sqlx::SqlitePool;
-use std::sync::Arc;
 
 use crate::cache::OriginCache;
 use crate::db::insert_attempt;
@@ -13,8 +12,13 @@ use crate::db::QueuedRequest;
 
 pub type Client = hyper::client::Client<HttpConnector, Body>;
 
-pub async fn proxy(pool: &SqlitePool, client: &Client, mut req: QueuedRequest) -> Result<bool> {
-    let uri = map_origin(pool, &req).await?;
+pub async fn proxy(
+    pool: &SqlitePool,
+    origin_cache: &OriginCache,
+    client: &Client,
+    mut req: QueuedRequest,
+) -> Result<bool> {
+    let uri = map_origin(origin_cache, &req).await?;
 
     if uri.is_none() {
         // no origin found, so mark as complete and move on
@@ -46,7 +50,7 @@ pub async fn proxy(pool: &SqlitePool, client: &Client, mut req: QueuedRequest) -
     Ok(is_success)
 }
 
-async fn map_origin(pool: &SqlitePool, req: &QueuedRequest) -> Result<Option<Uri>> {
+async fn map_origin(origin_cache: &OriginCache, req: &QueuedRequest) -> Result<Option<Uri>> {
     let uri = Uri::try_from(&req.uri)?;
     let parts = uri.into_parts();
 
@@ -73,15 +77,10 @@ async fn map_origin(pool: &SqlitePool, req: &QueuedRequest) -> Result<Option<Uri
     };
     tracing::debug!("authority = {}", &authority);
 
-    let origins_cache = Arc::new(OriginCache::new(pool.clone().into()));
-    tracing::debug!("origins = {:?}", &origins_cache);
-
-    origins_cache.refresh().await.unwrap();
-
-    let matching_origin = origins_cache.get(&authority.as_str()).await;
+    let matching_origin = origin_cache.get(authority.as_str());
 
     let origin_uri = match matching_origin {
-        Some(origin) => origin.origin_uri.clone(),
+        Some(origin) => origin.origin_uri,
         None => {
             tracing::trace!("no match found");
             return Ok(None);
