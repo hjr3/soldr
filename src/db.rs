@@ -5,7 +5,7 @@ use sqlx::Executor;
 
 use crate::ingest::HttpRequest;
 
-#[derive(Debug, Deserialize, Serialize, sqlx::FromRow)]
+#[derive(Debug, Deserialize, Serialize, sqlx::FromRow, Clone)]
 pub struct Origin {
     pub id: i64,
     pub domain: String,

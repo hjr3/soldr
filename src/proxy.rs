@@ -5,9 +5,10 @@ use hyper::client::HttpConnector;
 use hyper::Body;
 use hyper::Response;
 use sqlx::SqlitePool;
+use std::sync::Arc;
 
+use crate::cache::OriginCache;
 use crate::db::insert_attempt;
-use crate::db::list_origins;
 use crate::db::QueuedRequest;
 
 pub type Client = hyper::client::Client<HttpConnector, Body>;
@@ -72,14 +73,15 @@ async fn map_origin(pool: &SqlitePool, req: &QueuedRequest) -> Result<Option<Uri
     };
     tracing::debug!("authority = {}", &authority);
 
-    let origins = list_origins(pool).await?;
-    tracing::debug!("origins = {:?}", &origins);
-    let matching_origin = origins
-        .iter()
-        .find(|origin| origin.domain == authority.as_str());
+    let origins_cache = Arc::new(OriginCache::new(pool.clone().into()));
+    tracing::debug!("origins = {:?}", &origins_cache);
+
+    origins_cache.refresh().await.unwrap();
+
+    let matching_origin = origins_cache.get(&authority.as_str()).await;
 
     let origin_uri = match matching_origin {
-        Some(origin) => &origin.origin_uri,
+        Some(origin) => origin.origin_uri.clone(),
         None => {
             tracing::trace!("no match found");
             return Ok(None);

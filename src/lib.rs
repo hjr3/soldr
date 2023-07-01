@@ -1,3 +1,4 @@
+pub mod cache;
 pub mod db;
 pub mod error;
 pub mod ingest;
