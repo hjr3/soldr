@@ -17,7 +17,6 @@ use axum::{routing::post, Router};
 use hyper::HeaderMap;
 use serde::Deserialize;
 use sqlx::sqlite::SqlitePool;
-use std::net::SocketAddr;
 use tracing::Level;
 
 use crate::db::{ensure_schema, insert_request, mark_complete, mark_error};
@@ -45,11 +44,9 @@ impl Default for Config {
     }
 }
 
-pub async fn app(config: Config) -> Result<(Router, Router, SqlitePool, SocketAddr, SocketAddr)> {
+pub async fn app(config: &Config) -> Result<(Router, Router, SqlitePool)> {
     let pool = SqlitePool::connect(&config.database_url).await?;
     let pool2 = pool.clone();
-    let mgmt_listener = config.management_listener.parse()?;
-    let ingest_listener = config.ingest_listener.parse()?;
 
     ensure_schema(&pool).await?;
 
@@ -62,7 +59,7 @@ pub async fn app(config: Config) -> Result<(Router, Router, SqlitePool, SocketAd
         .layer(Extension(pool))
         .with_state(client);
 
-    Ok((router, mgmt_router, pool2, mgmt_listener, ingest_listener))
+    Ok((router, mgmt_router, pool2))
 }
 
 async fn handler(

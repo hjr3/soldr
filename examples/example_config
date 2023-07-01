@@ -1,2 +1,0 @@
-management_listener = "0.0.0.0:3444"
-ingest_listener = "0.0.0.0:3001"
