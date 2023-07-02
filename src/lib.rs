@@ -24,8 +24,11 @@ use crate::ingest::HttpRequest;
 use crate::proxy::{proxy, Client};
 
 #[derive(Debug, Deserialize)]
+#[serde(default)]
 pub struct Config {
     pub database_url: String,
+    pub management_listener: String,
+    pub ingest_listener: String,
 }
 
 impl Default for Config {
@@ -34,13 +37,16 @@ impl Default for Config {
             // TODO change to a file location
             // maybe $XDG_DATA_DIR ?
             database_url: "sqlite::memory:".to_string(),
+            management_listener: "0.0.0.0:3443".to_string(),
+            ingest_listener: "0.0.0.0:3000".to_string(),
         }
     }
 }
 
-pub async fn app(config: Config) -> Result<(Router, Router, SqlitePool)> {
+pub async fn app(config: &Config) -> Result<(Router, Router, SqlitePool)> {
     let pool = SqlitePool::connect(&config.database_url).await?;
     let pool2 = pool.clone();
+
     ensure_schema(&pool).await?;
 
     let mgmt_router = mgmt::router(pool.clone());

@@ -50,7 +50,7 @@ async fn ingest_save_and_proxy() {
             .unwrap();
     });
 
-    let (ingest, mgmt, _) = app(common::config()).await.unwrap();
+    let (ingest, mgmt, _) = app(&common::config()).await.unwrap();
 
     // create an origin mapping
     let domain = "example.wh.soldr.dev";
@@ -153,7 +153,7 @@ async fn ingest_proxy_error() {
             .unwrap();
     });
 
-    let (ingest, mgmt, _) = app(common::config()).await.unwrap();
+    let (ingest, mgmt, _) = app(&common::config()).await.unwrap();
 
     // create an origin mapping
     let domain = "example.wh.soldr.dev";
