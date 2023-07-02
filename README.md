@@ -62,9 +62,11 @@ Soldr has no opinions on event sourcing. Instead, soldr aims to be a transparent
 
 ## Basic Example
 
-Start the provided origin server: `cargo run --example origin`
+Start the provided origin server: `cargo run --example origin --release`
 
-In a separate terminal window, start soldr: `RUST_LOG=soldr=trace cargo run`
+In a separate terminal window, start soldr: `RUST_LOG=soldr=trace cargo run --release`
+
+If you want to start Soldr with a config file: `RUST_LOG=soldr=trace cargo run --release -- --config-path soldr.example.toml`
 
 In a separate terminal window, run the following curl requests:
 
