@@ -42,13 +42,11 @@ impl OriginCacheInner {
     }
 
     pub fn refresh(&self, new_origins: Vec<Origin>) -> Result<(), AppError> {
-        // Create a new HashMap to store the updated origin data
-        let mut map = HashMap::new();
-
         // Iterate over the fetched origins and insert them into the map
-        for origin in new_origins {
-            map.insert(origin.domain.clone(), origin);
-        }
+        let map = new_origins
+            .into_iter()
+            .map(|origin| (origin.domain.clone(), origin))
+            .collect();
 
         // Update the cache by acquiring a write lock and replacing the HashMap
         *self.origins.write() = map;
@@ -57,10 +55,12 @@ impl OriginCacheInner {
 
     pub fn get(&self, domain: &str) -> Option<Origin> {
         tracing::info!("Got called on cache for domain: {}", domain);
-        let origins = self.origins.read();
-
         // Look up domain in the cache and clone if found
-        let result = origins.get(domain).cloned();
+        let result = {
+            let origins = self.origins.read();
+
+            origins.get(domain).cloned()
+        };
 
         // Mostly for development, but also useful if you want to see how often the cache is hit
         if result.is_some() {
