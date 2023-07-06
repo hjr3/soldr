@@ -1,6 +1,8 @@
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
+use std::fmt;
 
+#[derive(Debug)]
 pub struct AppError(anyhow::Error);
 
 impl IntoResponse for AppError {
@@ -11,6 +13,12 @@ impl IntoResponse for AppError {
             "Unexpected error!".to_string(),
         )
             .into_response()
+    }
+}
+
+impl fmt::Display for AppError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Display::fmt(&self.0, f)
     }
 }
 
