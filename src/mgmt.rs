@@ -50,6 +50,7 @@ async fn list_attempts(
 pub struct CreateOrigin {
     pub domain: String,
     pub origin_uri: String,
+    pub timeout: Option<u32>,
 }
 
 async fn create_origin(
@@ -61,7 +62,13 @@ async fn create_origin(
     let _enter = span.enter();
 
     tracing::debug!("request payload = {:?}", &payload);
-    let origin = db::insert_origin(&pool, &payload.domain, &payload.origin_uri).await?;
+    let origin = db::insert_origin(
+        &pool,
+        &payload.domain,
+        &payload.origin_uri,
+        payload.timeout.unwrap_or(5000),
+    )
+    .await?;
     tracing::debug!("response = {:?}", &origin);
 
     let origins = db::list_origins(&pool).await?;

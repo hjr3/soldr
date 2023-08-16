@@ -10,6 +10,7 @@ pub struct Origin {
     pub id: i64,
     pub domain: String,
     pub origin_uri: String,
+    pub timeout: u32,
 }
 
 #[derive(Debug)]
@@ -74,6 +75,7 @@ pub async fn ensure_schema(pool: &SqlitePool) -> Result<()> {
              id INTEGER PRIMARY KEY AUTOINCREMENT,
              domain TEXT NOT NULL,
              origin_uri TEXT NOT NULL,
+             timeout INTEGER NOT NULL,
              created_at INTEGER NOT NULL,
              updated_at INTEGER NOT NULL
         )",
@@ -271,7 +273,12 @@ pub async fn list_attempts(pool: &SqlitePool) -> Result<Vec<Attempt>> {
 
 // TODO consider a stronger type for origin_uri
 // TOOD change the types so we can avoid String -> str -> String
-pub async fn insert_origin(pool: &SqlitePool, domain: &str, origin_uri: &str) -> Result<Origin> {
+pub async fn insert_origin(
+    pool: &SqlitePool,
+    domain: &str,
+    origin_uri: &str,
+    timeout: u32,
+) -> Result<Origin> {
     tracing::trace!("insert_origin");
     let mut conn = pool.acquire().await?;
 
@@ -280,10 +287,12 @@ pub async fn insert_origin(pool: &SqlitePool, domain: &str, origin_uri: &str) ->
         (
             domain,
             origin_uri,
+            timeout,
             created_at,
             updated_at
         )
         VALUES (
+            ?,
             ?,
             ?,
             strftime('%s','now'),
@@ -294,6 +303,7 @@ pub async fn insert_origin(pool: &SqlitePool, domain: &str, origin_uri: &str) ->
     let id = sqlx::query(query)
         .bind(domain)
         .bind(origin_uri)
+        .bind(timeout)
         .execute(&mut conn)
         .await?
         .last_insert_rowid();
@@ -302,11 +312,11 @@ pub async fn insert_origin(pool: &SqlitePool, domain: &str, origin_uri: &str) ->
         id,
         domain: domain.to_string(),
         origin_uri: origin_uri.to_string(),
+        timeout,
     };
     Ok(origin)
 }
 
-// TODO cache list of origins and only refresh if origins are modified (created, updated, deleted)
 pub async fn list_origins(pool: &SqlitePool) -> Result<Vec<Origin>> {
     tracing::trace!("list_origins");
     let mut conn = pool.acquire().await?;

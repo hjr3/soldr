@@ -10,6 +10,7 @@ use axum::http::StatusCode;
 use axum::{routing::post, Router};
 use soldr::db::RequestState;
 use tokio::sync::Mutex;
+use tokio::time::{sleep, Duration};
 use tower::util::ServiceExt;
 
 use soldr::mgmt::CreateOrigin;
@@ -31,6 +32,11 @@ async fn failure_handler() -> impl axum::response::IntoResponse {
         StatusCode::INTERNAL_SERVER_ERROR,
         "unexpected error".to_string(),
     )
+}
+
+async fn timeout_handler() -> impl axum::response::IntoResponse {
+    sleep(Duration::from_millis(6)).await;
+    "We shouldn't see this"
 }
 
 #[tokio::test]
@@ -57,6 +63,7 @@ async fn ingest_save_and_proxy() {
     let create_origin = CreateOrigin {
         domain: domain.to_string(),
         origin_uri: format!("http://localhost:{}", port),
+        timeout: None,
     };
     let body = serde_json::to_string(&create_origin).unwrap();
     let response = mgmt
@@ -160,6 +167,7 @@ async fn ingest_proxy_error() {
     let create_origin = CreateOrigin {
         domain: domain.to_string(),
         origin_uri: format!("http://localhost:{}", port),
+        timeout: None,
     };
     let body = serde_json::to_string(&create_origin).unwrap();
     let response = mgmt
@@ -235,4 +243,106 @@ async fn ingest_proxy_error() {
     assert_eq!(attempts[0].request_id, 1);
     assert_eq!(attempts[0].response_status, 500);
     assert_eq!(attempts[0].response_body, b"unexpected error");
+}
+
+#[tokio::test]
+async fn ingest_proxy_timeout() {
+    common::enable_tracing();
+
+    // set up origin server
+    let listener = TcpListener::bind("0.0.0.0:0".parse::<SocketAddr>().unwrap()).unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let client_app = Router::new().route("/timeout", post(timeout_handler));
+
+    tokio::spawn(async move {
+        axum::Server::from_tcp(listener)
+            .unwrap()
+            .serve(client_app.into_make_service())
+            .await
+            .unwrap();
+    });
+
+    let (ingest, mgmt, _) = app(&common::config()).await.unwrap();
+
+    // create an origin mapping
+    let domain = "example.wh.soldr.dev";
+    let create_origin = CreateOrigin {
+        domain: domain.to_string(),
+        origin_uri: format!("http://localhost:{}", port),
+        timeout: Some(5),
+    };
+    let body = serde_json::to_string(&create_origin).unwrap();
+    let response = mgmt
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/origins")
+                .header("Content-Type", "application/json")
+                .body(body.into())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+
+    // send a webhook request
+    // `Router` implements `tower::Service<Request<Body>>` so we can
+    // call it like any tower service, no need to run an HTTP server.
+    let response = ingest
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/timeout")
+                .header("Host", domain)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::NO_CONTENT);
+
+    // use management API to verify the request is marked error
+    let response = mgmt
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/requests")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let body = hyper::body::to_bytes(response.into_body()).await.unwrap();
+
+    let reqs: Vec<db::Request> = serde_json::from_slice(&body).unwrap();
+    assert_eq!(reqs[0].state, RequestState::Error);
+
+    // use management API to verify an attempt was made
+    let response = mgmt
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/attempts")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let body = hyper::body::to_bytes(response.into_body()).await.unwrap();
+
+    let attempts: Vec<db::Attempt> = serde_json::from_slice(&body).unwrap();
+    assert_eq!(attempts[0].id, 1);
+    assert_eq!(attempts[0].request_id, 1);
+    assert_eq!(attempts[0].response_status, 504);
+    assert_eq!(attempts[0].response_body, b"Timeout");
 }

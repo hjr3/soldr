@@ -36,6 +36,7 @@ async fn mgmt_create_origin() {
     let create_origin = CreateOrigin {
         domain: "example.wh.soldr.dev".to_string(),
         origin_uri: "https://www.example.com".to_string(),
+        timeout: None,
     };
     let body = serde_json::to_string(&create_origin).unwrap();
     let response = mgmt

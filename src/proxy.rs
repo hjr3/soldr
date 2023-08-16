@@ -5,6 +5,7 @@ use hyper::client::HttpConnector;
 use hyper::Body;
 use hyper::Response;
 use sqlx::SqlitePool;
+use tokio::time::{timeout, Duration};
 
 use crate::cache::OriginCache;
 use crate::db::insert_attempt;
@@ -18,14 +19,16 @@ pub async fn proxy(
     client: &Client,
     mut req: QueuedRequest,
 ) -> Result<bool> {
-    let uri = map_origin(origin_cache, &req).await?;
+    let maybe_origin = map_origin(origin_cache, &req).await?;
 
-    if uri.is_none() {
-        // no origin found, so mark as complete and move on
-        return Ok(true);
-    }
+    let origin = match maybe_origin {
+        Some(origin) => origin,
+        None => {
+            return Ok(true);
+        }
+    };
 
-    let uri = uri.unwrap();
+    let uri = origin.uri;
 
     let body = req.body.take();
     let body: hyper::Body = body.map_or(hyper::Body::empty(), |b| b.into());
@@ -35,7 +38,23 @@ pub async fn proxy(
         .uri(&uri)
         .body(body)?;
 
-    let response = client.request(new_req).await?;
+    let maybe_timeout = timeout(
+        Duration::from_millis(origin.timeout.into()),
+        client.request(new_req),
+    )
+    .await;
+
+    let response = match maybe_timeout {
+        Ok(response) => response?,
+        Err(_) => {
+            tracing::debug!("Timeout for {:?}", &req);
+            Response::builder()
+                .status(504)
+                .body(Body::from("Timeout"))
+                .expect("Failed to build timeout response")
+        }
+    };
+
     tracing::debug!(
         "Proxy {:?} --> {} with {} response",
         &req,
@@ -50,7 +69,12 @@ pub async fn proxy(
     Ok(is_success)
 }
 
-async fn map_origin(origin_cache: &OriginCache, req: &QueuedRequest) -> Result<Option<Uri>> {
+struct Origin {
+    uri: Uri,
+    timeout: u32,
+}
+
+async fn map_origin(origin_cache: &OriginCache, req: &QueuedRequest) -> Result<Option<Origin>> {
     let uri = Uri::try_from(&req.uri)?;
     let parts = uri.into_parts();
 
@@ -79,13 +103,15 @@ async fn map_origin(origin_cache: &OriginCache, req: &QueuedRequest) -> Result<O
 
     let matching_origin = origin_cache.get(authority.as_str());
 
-    let origin_uri = match matching_origin {
-        Some(origin) => origin.origin_uri,
+    let matched_origin = match matching_origin {
+        Some(origin) => origin,
         None => {
             tracing::trace!("no match found");
             return Ok(None);
         }
     };
+
+    let origin_uri = matched_origin.origin_uri;
 
     tracing::debug!("{} --> {}", &authority, &origin_uri);
 
@@ -100,7 +126,12 @@ async fn map_origin(origin_cache: &OriginCache, req: &QueuedRequest) -> Result<O
         .path_and_query(path_and_query)
         .build()?;
 
-    Ok(Some(uri))
+    let origin = Origin {
+        uri,
+        timeout: matched_origin.timeout,
+    };
+
+    Ok(Some(origin))
 }
 
 async fn record_attempt(
