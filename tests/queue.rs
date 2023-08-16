@@ -43,6 +43,7 @@ async fn queue_retry_request() {
     let create_origin = CreateOrigin {
         domain: domain.to_string(),
         origin_uri: format!("http://localhost:{}", port),
+        timeout: None,
     };
     let body = serde_json::to_string(&create_origin).unwrap();
     let response = mgmt
