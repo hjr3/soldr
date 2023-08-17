@@ -1,10 +1,11 @@
 pub mod cache;
 pub mod db;
 pub mod error;
-pub mod ingest;
 pub mod mgmt;
+pub mod origin;
 pub mod proxy;
 pub mod queue;
+pub mod request;
 
 use std::result::Result as StdResult;
 
@@ -21,10 +22,11 @@ use serde::Deserialize;
 use sqlx::sqlite::SqlitePool;
 
 use crate::cache::OriginCache;
-use crate::db::{ensure_schema, insert_request, mark_complete, mark_error};
+use crate::db::ensure_schema;
 use crate::error::AppError;
-use crate::ingest::HttpRequest;
 use crate::proxy::{proxy, Client};
+use crate::request::HttpRequest;
+use crate::request::State as RequestState;
 
 #[derive(Debug, Deserialize)]
 #[serde(default)]
@@ -88,16 +90,7 @@ async fn handler(
 
     tracing::debug!("{:?}", &r);
 
-    let queued_req = insert_request(&pool, r).await?;
-    let req_id = queued_req.id;
-
-    let is_success = proxy(&pool, &origin_cache, &client, queued_req).await?;
-
-    if is_success {
-        mark_complete(&pool, req_id).await?;
-    } else {
-        mark_error(&pool, req_id).await?;
-    }
+    proxy(&pool, &origin_cache, &client, RequestState::Received(r)).await;
 
     Ok(StatusCode::NO_CONTENT)
 }
