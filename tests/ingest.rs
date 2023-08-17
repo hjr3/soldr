@@ -118,7 +118,7 @@ async fn ingest_save_and_proxy() {
     let body = hyper::body::to_bytes(response.into_body()).await.unwrap();
 
     let reqs: Vec<db::Request> = serde_json::from_slice(&body).unwrap();
-    assert_eq!(reqs[0].state, RequestState::Complete);
+    assert_eq!(reqs[0].state, RequestState::Completed);
 
     // use management API to verify an attempt was made
     let response = mgmt
@@ -220,7 +220,7 @@ async fn ingest_proxy_error() {
     let body = hyper::body::to_bytes(response.into_body()).await.unwrap();
 
     let reqs: Vec<db::Request> = serde_json::from_slice(&body).unwrap();
-    assert_eq!(reqs[0].state, RequestState::Error);
+    assert_eq!(reqs[0].state, RequestState::Failed);
 
     // use management API to verify an attempt was made
     let response = mgmt
@@ -322,7 +322,7 @@ async fn ingest_proxy_timeout() {
     let body = hyper::body::to_bytes(response.into_body()).await.unwrap();
 
     let reqs: Vec<db::Request> = serde_json::from_slice(&body).unwrap();
-    assert_eq!(reqs[0].state, RequestState::Error);
+    assert_eq!(reqs[0].state, RequestState::Timeout);
 
     // use management API to verify an attempt was made
     let response = mgmt

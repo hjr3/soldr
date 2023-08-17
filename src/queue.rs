@@ -5,9 +5,10 @@ use sqlx::sqlite::SqlitePool;
 use tokio::time;
 
 use crate::cache::OriginCache;
+use crate::request::State;
 
 use crate::{
-    db::{list_failed_requests, mark_complete, mark_error, QueuedRequest},
+    db::{list_failed_requests, QueuedRequest},
     proxy::{self, Client},
 };
 
@@ -40,6 +41,7 @@ impl RetryQueue {
 }
 
 async fn do_tick(pool: &SqlitePool, origin_cache: &OriginCache) -> Result<()> {
+    // FIXME mark these as enqueued and then pull them out
     let requests = list_failed_requests(pool).await?;
 
     let mut tasks = Vec::with_capacity(requests.len());
@@ -66,15 +68,8 @@ async fn retry_request(
 ) -> Result<()> {
     tracing::trace!("retrying {:?}", &request);
 
-    let req_id = request.id;
     let client = Client::new();
-    let is_success = proxy::proxy(&pool, &origin_cache, &client, request).await?;
-
-    if is_success {
-        mark_complete(&pool, req_id).await?;
-    } else {
-        mark_error(&pool, req_id).await?;
-    }
+    proxy::proxy(&pool, &origin_cache, &client, State::Enqueued(request)).await;
 
     Ok(())
 }

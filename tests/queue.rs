@@ -96,7 +96,7 @@ async fn queue_retry_request() {
     let body = hyper::body::to_bytes(response.into_body()).await.unwrap();
 
     let reqs: Vec<db::Request> = serde_json::from_slice(&body).unwrap();
-    assert_eq!(reqs[0].state, RequestState::Error);
+    assert_eq!(reqs[0].state, RequestState::Failed);
 
     // use management API to verify an attempt was made
     let response = mgmt

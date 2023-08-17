@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use sqlx::sqlite::SqlitePool;
 use sqlx::Executor;
 
-use crate::ingest::HttpRequest;
+use crate::request::HttpRequest;
 
 #[derive(Debug, Deserialize, Serialize, sqlx::FromRow, Clone)]
 pub struct Origin {
@@ -20,14 +20,30 @@ pub struct QueuedRequest {
     pub uri: String,
     pub headers: Vec<(String, String)>,
     pub body: Option<Vec<u8>>,
+    pub state: RequestState,
 }
 
-#[derive(Debug, Deserialize, Serialize, sqlx::Type, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, sqlx::Type, Eq, PartialEq)]
 #[repr(i8)]
 pub enum RequestState {
-    Pending = 0,
-    Complete = 1,
-    Error = 2,
+    // request has been created and is ready to be processed
+    Received = 0,
+    // request has been created and is ready to be processed
+    Created = 1,
+    // request to origin is waiting to be processed
+    Enqueued = 2,
+    // request to origin is in progress
+    Active = 3,
+    // request completed successfully
+    Completed = 4,
+    // request to origin had a known error and can be retried
+    Failed = 5,
+    // unknown error
+    Panic = 6,
+    // request to origin timed out
+    Timeout = 7,
+    // no origin was found
+    Skipped = 8,
 }
 
 #[derive(Debug, Deserialize, Serialize, sqlx::FromRow)]
@@ -97,7 +113,11 @@ pub async fn ensure_schema(pool: &SqlitePool) -> Result<()> {
     Ok(())
 }
 
-pub async fn insert_request(pool: &SqlitePool, req: HttpRequest) -> Result<QueuedRequest> {
+pub async fn insert_request(
+    pool: &SqlitePool,
+    req: HttpRequest,
+    state: RequestState,
+) -> Result<QueuedRequest> {
     tracing::trace!("insert_request");
     let mut conn = pool.acquire().await?;
 
@@ -140,28 +160,22 @@ pub async fn insert_request(pool: &SqlitePool, req: HttpRequest) -> Result<Queue
         uri: req.uri,
         headers: req.headers,
         body: req.body,
+        state,
     };
 
     Ok(r)
 }
 
-pub async fn mark_complete(pool: &SqlitePool, req_id: i64) -> Result<()> {
-    tracing::trace!("mark_complete");
+pub async fn update_request_state(
+    pool: &SqlitePool,
+    req_id: i64,
+    state: RequestState,
+) -> Result<()> {
+    tracing::trace!("updating request state to {} for {}", state as i8, req_id);
     let mut conn = pool.acquire().await?;
 
-    sqlx::query("UPDATE requests SET state = 1 WHERE id = ?")
-        .bind(req_id)
-        .execute(&mut conn)
-        .await?;
-
-    Ok(())
-}
-
-pub async fn mark_error(pool: &SqlitePool, req_id: i64) -> Result<()> {
-    tracing::trace!("mark_error");
-    let mut conn = pool.acquire().await?;
-
-    sqlx::query("UPDATE requests SET state = 2 WHERE id = ?")
+    sqlx::query("UPDATE requests SET state = ? WHERE id = ?")
+        .bind(state)
         .bind(req_id)
         .execute(&mut conn)
         .await?;
@@ -176,7 +190,7 @@ pub async fn list_failed_requests(pool: &SqlitePool) -> Result<Vec<QueuedRequest
     let query = r#"
     SELECT *
     FROM requests
-    WHERE state = 2
+    WHERE state = ?
         AND id IN (
             SELECT request_id
             FROM attempts
@@ -187,6 +201,7 @@ pub async fn list_failed_requests(pool: &SqlitePool) -> Result<Vec<QueuedRequest
     "#;
 
     let requests = sqlx::query_as::<_, Request>(query)
+        .bind(RequestState::Failed)
         .fetch_all(&mut conn)
         .await?;
 
@@ -198,6 +213,7 @@ pub async fn list_failed_requests(pool: &SqlitePool) -> Result<Vec<QueuedRequest
             uri: request.uri,
             headers: serde_json::from_str(&request.headers).unwrap(),
             body: request.body,
+            state: request.state,
         })
         .collect();
 
@@ -243,7 +259,7 @@ pub async fn insert_attempt(
     let id = sqlx::query(query)
         .bind(request_id)
         .bind(response_status)
-        .bind(&response_body)
+        .bind(response_body)
         .execute(&mut conn)
         .await
         .map_err(|err| {
