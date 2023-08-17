@@ -1,7 +1,6 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use sqlx::sqlite::SqlitePool;
-use sqlx::Executor;
 
 use crate::request::HttpRequest;
 
@@ -67,48 +66,8 @@ pub struct Attempt {
 pub async fn ensure_schema(pool: &SqlitePool) -> Result<()> {
     let mut conn = pool.acquire().await?;
 
-    tracing::trace!("creating requests table");
-    // States
-    //  0 - pending
-    //  1 - complete
-    //  2 - error
-    conn.execute(
-        "CREATE TABLE IF NOT EXISTS requests (
-             id INTEGER PRIMARY KEY AUTOINCREMENT,
-             method TEXT NOT NULL,
-             uri TEXT NOT NULL,
-             headers TEXT NOT NULL,
-             body TEXT,
-             state INT(1) DEFAULT 0,
-             created_at INTEGER NOT NULL
-        )",
-    )
-    .await?;
-
-    tracing::trace!("creating origins table");
-    conn.execute(
-        "CREATE TABLE IF NOT EXISTS origins (
-             id INTEGER PRIMARY KEY AUTOINCREMENT,
-             domain TEXT NOT NULL,
-             origin_uri TEXT NOT NULL,
-             timeout INTEGER NOT NULL,
-             created_at INTEGER NOT NULL,
-             updated_at INTEGER NOT NULL
-        )",
-    )
-    .await?;
-
-    tracing::trace!("creating attempts table");
-    conn.execute(
-        "CREATE TABLE IF NOT EXISTS attempts (
-             id INTEGER PRIMARY KEY AUTOINCREMENT,
-             request_id INTEGER,
-             response_status INTEGER NOT NULL,
-             response_body BLOB NOT NULL,
-             created_at INTEGER NOT NULL
-        )",
-    )
-    .await?;
+    tracing::trace!("creating schema");
+    sqlx::migrate!().run(&mut conn).await?;
 
     Ok(())
 }
