@@ -18,3 +18,4 @@ tower-http = { version = "0.4.0", features = ["trace"] }
 clap = { version = "4.3.8", features = ["derive"] }
 toml = "0.7.5"
 parking_lot = "0.12.1"
+rand = "0.8.5"

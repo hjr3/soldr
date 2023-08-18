@@ -6,6 +6,7 @@ pub mod origin;
 pub mod proxy;
 pub mod queue;
 pub mod request;
+pub mod retry;
 
 use std::result::Result as StdResult;
 

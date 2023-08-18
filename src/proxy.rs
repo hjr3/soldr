@@ -10,6 +10,7 @@ use tokio::time::{timeout, Duration};
 use crate::cache::OriginCache;
 use crate::db::insert_attempt;
 use crate::db::insert_request;
+use crate::db::retry_request;
 use crate::db::update_request_state;
 use crate::db::QueuedRequest;
 use crate::db::RequestState;
@@ -124,11 +125,11 @@ pub async fn proxy(
                 return;
             }
             State::Failed(req_id) => {
-                match update_request_state(pool, req_id, RequestState::Failed).await {
+                match retry_request(pool, req_id, RequestState::Failed).await {
                     Ok(_) => {}
                     Err(error) => {
                         tracing::error!(
-                            "Error updating state to {:?} for {:?}: {:?}",
+                            "Error calling retry_request for state {:?} on req_id {:?}: {:?}",
                             RequestState::Failed,
                             req_id,
                             error
@@ -138,11 +139,11 @@ pub async fn proxy(
                 return;
             }
             State::Panic(req_id) => {
-                match update_request_state(pool, req_id, RequestState::Panic).await {
+                match retry_request(pool, req_id, RequestState::Panic).await {
                     Ok(_) => {}
                     Err(error) => {
                         tracing::error!(
-                            "Error updating state to {:?} for {:?}: {:?}",
+                            "Error calling retry_request for state {:?} on req_id {:?}: {:?}",
                             RequestState::Panic,
                             req_id,
                             error
@@ -152,11 +153,11 @@ pub async fn proxy(
                 break;
             }
             State::Timeout(req_id) => {
-                match update_request_state(pool, req_id, RequestState::Timeout).await {
+                match retry_request(pool, req_id, RequestState::Timeout).await {
                     Ok(_) => {}
                     Err(error) => {
                         tracing::error!(
-                            "Error updating state to {:?} for {:?}: {:?}",
+                            "Error calling retry_request for state {:?} on req_id {:?}: {:?}",
                             RequestState::Timeout,
                             req_id,
                             error

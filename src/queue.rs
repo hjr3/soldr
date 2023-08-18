@@ -5,12 +5,9 @@ use sqlx::sqlite::SqlitePool;
 use tokio::time;
 
 use crate::cache::OriginCache;
+use crate::db::{list_failed_requests, purge_completed_requests, QueuedRequest};
+use crate::proxy::{self, Client};
 use crate::request::State;
-
-use crate::{
-    db::{list_failed_requests, QueuedRequest},
-    proxy::{self, Client},
-};
 
 pub struct RetryQueue {
     pool: SqlitePool,
@@ -41,6 +38,8 @@ impl RetryQueue {
 }
 
 async fn do_tick(pool: &SqlitePool, origin_cache: &OriginCache) -> Result<()> {
+    purge_completed_requests(pool, 30).await?;
+
     // FIXME mark these as enqueued and then pull them out
     let requests = list_failed_requests(pool).await?;
 

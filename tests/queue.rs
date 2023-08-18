@@ -1,6 +1,7 @@
 mod common;
 
 use std::net::{SocketAddr, TcpListener};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use axum::body::Body;
 use axum::http::Request;
@@ -143,4 +144,34 @@ async fn queue_retry_request() {
     let attempts: Vec<db::Attempt> = serde_json::from_slice(&body).unwrap();
     assert_eq!(attempts[0].id, 2);
     assert_eq!(attempts[0].request_id, 1);
+
+    // use management API to verify retry_at is set
+    let response = mgmt
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/requests")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let body = hyper::body::to_bytes(response.into_body()).await.unwrap();
+
+    let requests: Vec<db::Request> = serde_json::from_slice(&body).unwrap();
+
+    let current_time = SystemTime::now();
+    let since_epoch = current_time
+        .duration_since(UNIX_EPOCH)
+        .expect("Time went backwards");
+    let milliseconds = since_epoch.as_millis();
+
+    let diff = requests[0].retry_ms_at - milliseconds as i64;
+    // the second retry should be less than 3.4 seconds of now
+    // rationale: 1.52^(2 attempts) = 2310ms + max(0ms, 1000ms) = 3310ms
+    assert!(diff.abs() < 3400);
 }
