@@ -348,3 +348,22 @@ pub async fn list_origins(pool: &SqlitePool) -> Result<Vec<Origin>> {
 
     Ok(origins)
 }
+
+pub async fn purge_completed_requests(pool: &SqlitePool, days: u32) -> Result<()> {
+    tracing::trace!("purge_completed_requests");
+    let mut conn = pool.acquire().await?;
+
+    let query = r#"
+        DELETE FROM requests
+        WHERE state = ?
+            AND created_at > strftime('%s','now') - 60 * 60 * 24 * ?;
+    "#;
+
+    sqlx::query(query)
+        .bind(RequestState::Completed)
+        .bind(days)
+        .execute(&mut conn)
+        .await?;
+
+    Ok(())
+}
