@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use sqlx::sqlite::SqlitePool;
 
 use crate::request::HttpRequest;
+use crate::retry::backoff;
 
 #[derive(Debug, Deserialize, Serialize, sqlx::FromRow, Clone)]
 pub struct Origin {
@@ -53,6 +54,7 @@ pub struct Request {
     pub headers: String,
     pub body: Option<Vec<u8>>,
     pub state: RequestState,
+    pub retry_ms_at: i64,
 }
 
 #[derive(Debug, Deserialize, Serialize, sqlx::FromRow)]
@@ -142,6 +144,49 @@ pub async fn update_request_state(
     Ok(())
 }
 
+pub async fn retry_request(pool: &SqlitePool, req_id: i64, state: RequestState) -> Result<()> {
+    tracing::trace!("retry_request");
+    let mut conn = pool.acquire().await?;
+
+    let query = r#"
+    SELECT COUNT(*)
+    FROM attempts
+    WHERE request_id = ?;
+    "#;
+
+    let retries = sqlx::query_scalar(query)
+        .bind(req_id)
+        .fetch_one(&mut conn)
+        .await?;
+
+    if retries > 19 {
+        tracing::warn!(
+            "request {} has been retried {} times. skipping",
+            req_id,
+            retries
+        );
+        return Ok(());
+    }
+
+    let retry_ms = backoff(retries);
+    let query = r#"
+    UPDATE requests
+    SET
+        state = ?,
+        retry_ms_at = strftime('%s','now') || substr(strftime('%f','now'), 4) + ?
+    WHERE id = ?;
+    "#;
+
+    sqlx::query(query)
+        .bind(state)
+        .bind(retry_ms)
+        .bind(req_id)
+        .execute(&mut conn)
+        .await?;
+
+    Ok(())
+}
+
 pub async fn list_failed_requests(pool: &SqlitePool) -> Result<Vec<QueuedRequest>> {
     tracing::trace!("list_failed_requests");
     let mut conn = pool.acquire().await?;
@@ -183,9 +228,10 @@ pub async fn list_requests(pool: &SqlitePool) -> Result<Vec<Request>> {
     tracing::trace!("list_requests");
     let mut conn = pool.acquire().await?;
 
-    let requests = sqlx::query_as::<_, Request>("SELECT * FROM requests LIMIT 10;")
-        .fetch_all(&mut conn)
-        .await?;
+    let requests =
+        sqlx::query_as::<_, Request>("SELECT * FROM requests ORDER BY id DESC LIMIT 10;")
+            .fetch_all(&mut conn)
+            .await?;
 
     Ok(requests)
 }

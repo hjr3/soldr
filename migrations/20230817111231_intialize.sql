@@ -5,7 +5,8 @@ CREATE TABLE IF NOT EXISTS requests (
      headers TEXT NOT NULL,
      body TEXT,
      state INT(1) DEFAULT 0,
-     created_at INTEGER NOT NULL
+     created_at INTEGER NOT NULL,
+     retry_ms_at INTEGER     
 );
 
 CREATE TABLE IF NOT EXISTS origins (
