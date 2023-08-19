@@ -16,7 +16,7 @@ use axum::extract::{Extension, State};
 use axum::http::Request;
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
-use axum::{routing::post, Router};
+use axum::{routing::any, Router};
 use hyper::HeaderMap;
 use queue::RetryQueue;
 use serde::Deserialize;
@@ -59,8 +59,8 @@ pub async fn app(config: &Config) -> Result<(Router, Router, RetryQueue)> {
 
     let client = Client::new();
     let router = Router::new()
-        .route("/", post(handler))
-        .route("/*path", post(handler))
+        .route("/", any(handler))
+        .route("/*path", any(handler))
         .layer(Extension(pool.clone()))
         .layer(Extension(origin_cache.clone()))
         .with_state(client);
