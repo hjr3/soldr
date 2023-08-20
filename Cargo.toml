@@ -19,3 +19,4 @@ clap = { version = "4.3.8", features = ["derive"] }
 toml = "0.7.5"
 parking_lot = "0.12.1"
 rand = "0.8.5"
+lettre = { version = "0.10.4", default-features = false, features = ["smtp-transport", "tokio1", "tokio1-rustls-tls", "builder"] }

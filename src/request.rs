@@ -25,11 +25,11 @@ pub enum State {
     // request to origin was successful
     Completed(i64),
     // request to origin had a known error and can be retried
-    Failed(i64),
+    Failed(i64, Origin),
     // unknown error
-    Panic(i64),
+    Panic(i64, Origin),
     // request to origin timed out
-    Timeout(i64),
+    Timeout(i64, Origin),
     // no origin was found
     Skipped(i64),
 }

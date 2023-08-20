@@ -7,7 +7,9 @@ use hyper::Response;
 use sqlx::SqlitePool;
 use tokio::time::{timeout, Duration};
 
+use crate::alert::send_alert;
 use crate::cache::OriginCache;
+use crate::db::attempts_reached_threshold;
 use crate::db::insert_attempt;
 use crate::db::insert_request;
 use crate::db::retry_request;
@@ -16,6 +18,8 @@ use crate::db::QueuedRequest;
 use crate::db::RequestState;
 use crate::origin::Origin;
 use crate::request::State;
+use crate::response::transform_response;
+use crate::response::HttpResponse;
 
 pub type Client = hyper::client::Client<HttpConnector, Body>;
 
@@ -74,11 +78,13 @@ pub async fn proxy(
             },
             State::Active(req, origin) => {
                 let req_id = req.id;
-                match send_request(origin, client, req).await {
+                match send_request(&origin, client, req).await {
                     Ok(response) => {
+                        let response = transform_response(response).await;
                         let is_success = response.status().is_success();
                         let is_timeout = response.status() == 504;
-                        match record_attempt(pool, req_id, response).await {
+
+                        match record_attempt(pool, req_id, &response).await {
                             Ok(attempt_id) => {
                                 tracing::debug!(
                                     "Recorded attempt {} for request {}",
@@ -99,14 +105,14 @@ pub async fn proxy(
                         if is_success {
                             state = State::Completed(req_id);
                         } else if is_timeout {
-                            state = State::Timeout(req_id);
+                            state = State::Timeout(req_id, origin);
                         } else {
-                            state = State::Failed(req_id);
+                            state = State::Failed(req_id, origin);
                         }
                     }
                     Err(error) => {
                         tracing::error!("Error proxying {:?}: {:?}", req_id, error);
-                        state = State::Panic(req_id);
+                        state = State::Panic(req_id, origin);
                     }
                 }
             }
@@ -124,7 +130,7 @@ pub async fn proxy(
                 }
                 return;
             }
-            State::Failed(req_id) => {
+            State::Failed(req_id, origin) => {
                 match retry_request(pool, req_id, RequestState::Failed).await {
                     Ok(_) => {}
                     Err(error) => {
@@ -136,9 +142,29 @@ pub async fn proxy(
                         );
                     }
                 }
+
+                if let Some(threshold) = origin.alert_threshold {
+                    match attempts_reached_threshold(pool, req_id, threshold).await {
+                        Ok(true) => {
+                            send_alert(&origin, req_id).await;
+                        }
+                        Ok(false) => { /* do nothing */ }
+                        Err(error) => {
+                            tracing::error!(
+                                "Error calling attempts_reached_threshold for req_id {:?}: {:?}",
+                                req_id,
+                                error
+                            );
+
+                            // err on the side of caution
+                            send_alert(&origin, req_id).await;
+                        }
+                    }
+                }
+
                 return;
             }
-            State::Panic(req_id) => {
+            State::Panic(req_id, origin) => {
                 match retry_request(pool, req_id, RequestState::Panic).await {
                     Ok(_) => {}
                     Err(error) => {
@@ -150,9 +176,12 @@ pub async fn proxy(
                         );
                     }
                 }
-                break;
+
+                send_alert(&origin, req_id).await;
+
+                return;
             }
-            State::Timeout(req_id) => {
+            State::Timeout(req_id, origin) => {
                 match retry_request(pool, req_id, RequestState::Timeout).await {
                     Ok(_) => {}
                     Err(error) => {
@@ -164,7 +193,26 @@ pub async fn proxy(
                         );
                     }
                 }
-                break;
+
+                if let Some(threshold) = origin.alert_threshold {
+                    match attempts_reached_threshold(pool, req_id, threshold).await {
+                        Ok(true) => {
+                            send_alert(&origin, req_id).await;
+                        }
+                        Ok(false) => { /* do nothing */ }
+                        Err(error) => {
+                            tracing::error!(
+                                "Error calling attempts_reached_threshold for req_id {:?}: {:?}",
+                                req_id,
+                                error
+                            );
+
+                            // err on the side of caution
+                            send_alert(&origin, req_id).await;
+                        }
+                    }
+                }
+                return;
             }
             State::Skipped(req_id) => {
                 match update_request_state(pool, req_id, RequestState::Skipped).await {
@@ -178,18 +226,32 @@ pub async fn proxy(
                         );
                     }
                 }
-                break;
+                return;
             }
         }
     }
 }
 
 async fn send_request(
-    origin: Origin,
+    origin: &Origin,
     client: &Client,
     mut req: QueuedRequest,
 ) -> Result<Response<Body>> {
-    let uri = origin.uri;
+    let parts = Uri::try_from(&req.uri)?.into_parts();
+
+    let path_and_query = parts
+        .path_and_query
+        .ok_or(anyhow!("Missing path and query: {}", req.uri))?;
+
+    let origin_parts = origin.uri.clone().into_parts();
+    let scheme = origin_parts.scheme.ok_or(anyhow!("Missing scheme"))?;
+    let authority = origin_parts.authority.ok_or(anyhow!("Missing authority"))?;
+
+    let uri = Uri::builder()
+        .scheme(scheme)
+        .authority(authority)
+        .path_and_query(path_and_query)
+        .build()?;
 
     let body = req.body.take();
     let body: hyper::Body = body.map_or(hyper::Body::empty(), |b| b.into());
@@ -230,10 +292,6 @@ async fn map_origin(origin_cache: &OriginCache, req: &QueuedRequest) -> Result<O
     let uri = Uri::try_from(&req.uri)?;
     let parts = uri.into_parts();
 
-    let path_and_query = parts
-        .path_and_query
-        .ok_or(anyhow!("Missing path and query: {}", req.uri))?;
-
     let authority = if parts.authority.is_some() {
         parts.authority.unwrap()
     } else {
@@ -263,24 +321,18 @@ async fn map_origin(origin_cache: &OriginCache, req: &QueuedRequest) -> Result<O
         }
     };
 
-    let origin_uri = matched_origin.origin_uri;
-
-    tracing::debug!("{} --> {}", &authority, &origin_uri);
-
-    let uri = Uri::try_from(origin_uri)?;
-    let origin_parts = uri.into_parts();
-    let scheme = origin_parts.scheme.ok_or(anyhow!("Missing scheme"))?;
-    let authority = origin_parts.authority.ok_or(anyhow!("Missing authority"))?;
-
-    let uri = Uri::builder()
-        .scheme(scheme)
-        .authority(authority)
-        .path_and_query(path_and_query)
-        .build()?;
+    tracing::debug!("{} --> {}", &authority, &matched_origin.origin_uri);
 
     let origin = Origin {
-        uri,
+        uri: matched_origin.origin_uri.try_into()?,
         timeout: matched_origin.timeout,
+        alert_threshold: matched_origin.alert_threshold,
+        alert_email: matched_origin.alert_email,
+        smtp_host: matched_origin.smtp_host,
+        smtp_port: matched_origin.smtp_port,
+        smtp_username: matched_origin.smtp_username,
+        smtp_password: matched_origin.smtp_password,
+        smtp_tls: matched_origin.smtp_tls,
     };
 
     Ok(Some(origin))
@@ -289,13 +341,14 @@ async fn map_origin(origin_cache: &OriginCache, req: &QueuedRequest) -> Result<O
 async fn record_attempt(
     pool: &SqlitePool,
     request_id: i64,
-    attempt_req: Response<Body>,
+    response: &HttpResponse,
 ) -> Result<i64> {
-    let response_status = attempt_req.status().as_u16() as i64;
-    let response_body = attempt_req.into_body();
-    let response_body = hyper::body::to_bytes(response_body).await?;
+    let body: Option<&[u8]> = match response.body() {
+        Some(inner_vec) => Some(inner_vec.as_slice()),
+        None => None,
+    };
 
-    let attempt_id = insert_attempt(pool, request_id, response_status, &response_body).await?;
+    let attempt_id = insert_attempt(pool, request_id, response.status().as_u16(), body).await?;
 
     Ok(attempt_id)
 }

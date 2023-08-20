@@ -5,7 +5,6 @@ use axum::{
     routing::{get, post},
     Router,
 };
-use serde::{Deserialize, Serialize};
 use sqlx::sqlite::SqlitePool;
 use tracing::Level;
 
@@ -46,29 +45,16 @@ async fn list_attempts(
     Ok(Json(attempts))
 }
 
-#[derive(Debug, Deserialize, Serialize)]
-pub struct CreateOrigin {
-    pub domain: String,
-    pub origin_uri: String,
-    pub timeout: Option<u32>,
-}
-
 async fn create_origin(
     Extension(pool): Extension<SqlitePool>,
     Extension(origin_cache): Extension<OriginCache>,
-    Json(payload): Json<CreateOrigin>,
+    Json(new_origin): Json<db::NewOrigin>,
 ) -> StdResult<Json<db::Origin>, AppError> {
     let span = tracing::span!(Level::TRACE, "create_origin");
     let _enter = span.enter();
 
-    tracing::debug!("request payload = {:?}", &payload);
-    let origin = db::insert_origin(
-        &pool,
-        &payload.domain,
-        &payload.origin_uri,
-        payload.timeout.unwrap_or(5000),
-    )
-    .await?;
+    tracing::debug!("request payload = {:?}", &new_origin);
+    let origin = db::insert_origin(&pool, new_origin).await?;
     tracing::debug!("response = {:?}", &origin);
 
     let origins = db::list_origins(&pool).await?;

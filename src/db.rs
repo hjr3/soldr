@@ -11,6 +11,13 @@ pub struct Origin {
     pub domain: String,
     pub origin_uri: String,
     pub timeout: u32,
+    pub alert_threshold: Option<u16>,
+    pub alert_email: Option<String>,
+    pub smtp_host: Option<String>,
+    pub smtp_username: Option<String>,
+    pub smtp_password: Option<String>,
+    pub smtp_port: Option<u16>,
+    pub smtp_tls: bool,
 }
 
 #[derive(Debug)]
@@ -187,6 +194,28 @@ pub async fn retry_request(pool: &SqlitePool, req_id: i64, state: RequestState) 
     Ok(())
 }
 
+pub async fn attempts_reached_threshold(
+    pool: &SqlitePool,
+    req_id: i64,
+    threshold: u16,
+) -> Result<bool> {
+    tracing::trace!("above_threshold");
+    let mut conn = pool.acquire().await?;
+
+    let query = r#"
+    SELECT COUNT(*)
+    FROM attempts
+    WHERE request_id = ?;
+    "#;
+
+    let count: i64 = sqlx::query_scalar(query)
+        .bind(req_id)
+        .fetch_one(&mut conn)
+        .await?;
+
+    Ok(count >= threshold.into())
+}
+
 pub async fn list_failed_requests(pool: &SqlitePool) -> Result<Vec<QueuedRequest>> {
     tracing::trace!("list_failed_requests");
     let mut conn = pool.acquire().await?;
@@ -239,8 +268,8 @@ pub async fn list_requests(pool: &SqlitePool) -> Result<Vec<Request>> {
 pub async fn insert_attempt(
     pool: &SqlitePool,
     request_id: i64,
-    response_status: i64,
-    response_body: &[u8],
+    response_status: u16,
+    response_body: Option<&[u8]>,
 ) -> Result<i64> {
     tracing::trace!("insert_attempt");
     let mut conn = pool.acquire().await?;
@@ -292,14 +321,21 @@ pub async fn list_attempts(pool: &SqlitePool) -> Result<Vec<Attempt>> {
     Ok(attempts)
 }
 
-// TODO consider a stronger type for origin_uri
-// TOOD change the types so we can avoid String -> str -> String
-pub async fn insert_origin(
-    pool: &SqlitePool,
-    domain: &str,
-    origin_uri: &str,
-    timeout: u32,
-) -> Result<Origin> {
+#[derive(Debug, Default, Deserialize, Serialize)]
+pub struct NewOrigin {
+    pub domain: String,
+    pub origin_uri: String,
+    pub timeout: u32,
+    pub alert_threshold: Option<u16>,
+    pub alert_email: Option<String>,
+    pub smtp_host: Option<String>,
+    pub smtp_username: Option<String>,
+    pub smtp_password: Option<String>,
+    pub smtp_port: Option<u16>,
+    pub smtp_tls: bool,
+}
+
+pub async fn insert_origin(pool: &SqlitePool, origin: NewOrigin) -> Result<Origin> {
     tracing::trace!("insert_origin");
     let mut conn = pool.acquire().await?;
 
@@ -309,6 +345,13 @@ pub async fn insert_origin(
             domain,
             origin_uri,
             timeout,
+            alert_threshold,
+            alert_email,
+            smtp_host,
+            smtp_username,
+            smtp_password,
+            smtp_port,
+            smtp_tls,
             created_at,
             updated_at
         )
@@ -316,26 +359,34 @@ pub async fn insert_origin(
             ?,
             ?,
             ?,
+            ?,
+            ?,
+            ?,
+            ?,
+            ?,
+            ?,
+            ?,
             strftime('%s','now'),
             strftime('%s','now')
         )
+        RETURNING *
     "#;
 
-    let id = sqlx::query(query)
-        .bind(domain)
-        .bind(origin_uri)
-        .bind(timeout)
-        .execute(&mut conn)
-        .await?
-        .last_insert_rowid();
+    let created_origin = sqlx::query_as::<_, Origin>(query)
+        .bind(origin.domain)
+        .bind(origin.origin_uri)
+        .bind(origin.timeout)
+        .bind(origin.alert_threshold)
+        .bind(origin.alert_email)
+        .bind(origin.smtp_host)
+        .bind(origin.smtp_username)
+        .bind(origin.smtp_password)
+        .bind(origin.smtp_port)
+        .bind(origin.smtp_tls)
+        .fetch_one(&mut conn)
+        .await?;
 
-    let origin = Origin {
-        id,
-        domain: domain.to_string(),
-        origin_uri: origin_uri.to_string(),
-        timeout,
-    };
-    Ok(origin)
+    Ok(created_origin)
 }
 
 pub async fn list_origins(pool: &SqlitePool) -> Result<Vec<Origin>> {

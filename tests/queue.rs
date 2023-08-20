@@ -10,7 +10,7 @@ use axum::{routing::post, Router};
 use soldr::db::RequestState;
 use tower::util::ServiceExt;
 
-use soldr::mgmt::CreateOrigin;
+use soldr::db::NewOrigin;
 use soldr::{app, db};
 
 async fn failure_handler() -> impl axum::response::IntoResponse {
@@ -41,10 +41,11 @@ async fn queue_retry_request() {
 
     // create an origin mapping
     let domain = "example.wh.soldr.dev";
-    let create_origin = CreateOrigin {
+    let create_origin = NewOrigin {
         domain: domain.to_string(),
         origin_uri: format!("http://localhost:{}", port),
-        timeout: None,
+        timeout: 100,
+        ..Default::default()
     };
     let body = serde_json::to_string(&create_origin).unwrap();
     let response = mgmt

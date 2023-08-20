@@ -5,7 +5,7 @@ use axum::http::Request;
 use axum::http::StatusCode;
 use tower::util::ServiceExt;
 
-use soldr::mgmt::CreateOrigin;
+use soldr::db::NewOrigin;
 use soldr::{app, db};
 
 #[tokio::test]
@@ -33,10 +33,11 @@ async fn mgmt_list_requests() {
 async fn mgmt_create_origin() {
     let (_, mgmt, _) = app(&common::config()).await.unwrap();
 
-    let create_origin = CreateOrigin {
+    let create_origin = NewOrigin {
         domain: "example.wh.soldr.dev".to_string(),
         origin_uri: "https://www.example.com".to_string(),
-        timeout: None,
+        timeout: 100,
+        ..Default::default()
     };
     let body = serde_json::to_string(&create_origin).unwrap();
     let response = mgmt

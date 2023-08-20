@@ -3,6 +3,13 @@ CREATE TABLE IF NOT EXISTS origins (
      domain TEXT NOT NULL,
      origin_uri TEXT NOT NULL,
      timeout INTEGER NOT NULL,
+     alert_threshold SMALLINT,
+     alert_email TEXT,
+     smtp_host TEXT,
+     smtp_username TEXT,
+     smtp_password TEXT,
+     smtp_port SMALLINT,
+     smtp_tls INT(1) NOT NULL DEFAULT 0,
      created_at INTEGER NOT NULL,
      updated_at INTEGER NOT NULL
 );
@@ -13,7 +20,7 @@ CREATE TABLE IF NOT EXISTS requests (
      uri TEXT NOT NULL,
      headers TEXT NOT NULL,
      body TEXT,
-     state INT(1) DEFAULT 0,
+     state INT(1) NOT NULL DEFAULT 0,
      created_at INTEGER NOT NULL,
      retry_ms_at INTEGER     
 );
