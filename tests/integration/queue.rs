@@ -1,4 +1,4 @@
-mod common;
+use crate::common;
 
 use std::net::{SocketAddr, TcpListener};
 use std::time::{SystemTime, UNIX_EPOCH};
