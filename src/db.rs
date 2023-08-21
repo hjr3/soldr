@@ -223,21 +223,19 @@ pub async fn list_failed_requests(pool: &SqlitePool) -> Result<Vec<QueuedRequest
     let query = r#"
     SELECT *
     FROM requests
-    WHERE state = ?
-        AND id IN (
-            SELECT request_id
-            FROM attempts
-            GROUP BY request_id
-            ORDER BY created_at
-            LIMIT 10
-        );
+    WHERE state IN (?, ?, ?, ?)
+        AND retry_ms_at <= strftime('%s','now') || substr(strftime('%f','now'), 4)
     "#;
 
     let requests = sqlx::query_as::<_, Request>(query)
+        .bind(RequestState::Created)
         .bind(RequestState::Failed)
+        .bind(RequestState::Panic)
+        .bind(RequestState::Timeout)
         .fetch_all(&mut conn)
         .await?;
 
+    dbg!(&requests);
     let queued_requests = requests
         .into_iter()
         .map(|request| QueuedRequest {
@@ -413,6 +411,28 @@ pub async fn purge_completed_requests(pool: &SqlitePool, days: u32) -> Result<()
     sqlx::query(query)
         .bind(RequestState::Completed)
         .bind(days)
+        .execute(&mut conn)
+        .await?;
+
+    Ok(())
+}
+
+pub async fn add_request_to_queue(pool: &SqlitePool, req_id: i64) -> Result<()> {
+    tracing::trace!("retry_requests");
+    let mut conn = pool.acquire().await?;
+
+    let query = r#"
+        UPDATE requests
+        SET
+            state = ?,
+            retry_ms_at = strftime('%s','now') || substr(strftime('%f','now'), 4)
+        WHERE id = ?;
+        ;
+    "#;
+
+    sqlx::query(query)
+        .bind(RequestState::Created)
+        .bind(req_id)
         .execute(&mut conn)
         .await?;
 

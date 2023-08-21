@@ -1,10 +1,13 @@
 use std::result::Result as StdResult;
 
 use axum::extract::{Extension, Json};
+use axum::http::StatusCode;
+use axum::response::IntoResponse;
 use axum::{
     routing::{get, post},
     Router,
 };
+use serde::{Deserialize, Serialize};
 use sqlx::sqlite::SqlitePool;
 use tracing::Level;
 
@@ -17,6 +20,7 @@ pub fn router(pool: SqlitePool, origin_cache: OriginCache) -> Router {
         .route("/origins", post(create_origin))
         .route("/requests", get(list_requests))
         .route("/attempts", get(list_attempts))
+        .route("/queue", post(add_request_to_queue))
         .layer(Extension(pool))
         .layer(Extension(origin_cache))
 }
@@ -61,4 +65,21 @@ async fn create_origin(
     origin_cache.refresh(origins).unwrap();
 
     Ok(Json(origin))
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct NewQueueRequest {
+    pub req_id: i64,
+}
+
+async fn add_request_to_queue(
+    Extension(pool): Extension<SqlitePool>,
+    Json(payload): Json<NewQueueRequest>,
+) -> StdResult<impl IntoResponse, AppError> {
+    let span = tracing::span!(Level::TRACE, "add_request_to_queue");
+    let _enter = span.enter();
+
+    db::add_request_to_queue(&pool, payload.req_id).await?;
+
+    Ok(StatusCode::ACCEPTED)
 }

@@ -11,6 +11,7 @@ use soldr::db::RequestState;
 use tower::util::ServiceExt;
 
 use soldr::db::NewOrigin;
+use soldr::mgmt::NewQueueRequest;
 use soldr::{app, db};
 
 async fn failure_handler() -> impl axum::response::IntoResponse {
@@ -122,6 +123,26 @@ async fn queue_retry_request() {
     assert_eq!(attempts[0].request_id, 1);
     assert_eq!(attempts[0].response_status, 500);
     assert_eq!(attempts[0].response_body, b"unexpected error");
+
+    // use management API to set the retry_ms_at to be now so our test
+    // does not have to sleep
+    let new_queue_request = NewQueueRequest {
+        req_id: attempts[0].id,
+    };
+    let body = serde_json::to_string(&new_queue_request).unwrap();
+    let response = mgmt
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/queue")
+                .header("Content-Type", "application/json")
+                .body(body.into())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::ACCEPTED);
 
     retry_queue.tick().await;
 
