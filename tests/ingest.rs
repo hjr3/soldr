@@ -13,7 +13,7 @@ use tokio::sync::Mutex;
 use tokio::time::{sleep, Duration};
 use tower::util::ServiceExt;
 
-use soldr::mgmt::CreateOrigin;
+use soldr::db::NewOrigin;
 use soldr::{app, db};
 
 type Sentinel = Arc<Mutex<Option<Request<Body>>>>;
@@ -60,10 +60,11 @@ async fn ingest_save_and_proxy() {
 
     // create an origin mapping
     let domain = "example.wh.soldr.dev";
-    let create_origin = CreateOrigin {
+    let create_origin = NewOrigin {
         domain: domain.to_string(),
         origin_uri: format!("http://localhost:{}", port),
-        timeout: None,
+        timeout: 100,
+        ..Default::default()
     };
     let body = serde_json::to_string(&create_origin).unwrap();
     let response = mgmt
@@ -143,8 +144,11 @@ async fn ingest_save_and_proxy() {
     assert_eq!(attempts[0].response_body, b"Hello, World!");
 }
 
+// Note: This test will log a failure when it tries to send an email alert
+// To test that the email alert works, you can run the following:
+// `python3 -m smtpd -n -c DebuggingServer 127.0.0.1:2525`
 #[tokio::test]
-async fn ingest_proxy_error() {
+async fn ingest_proxy_failure() {
     common::enable_tracing();
 
     // set up origin server
@@ -164,10 +168,17 @@ async fn ingest_proxy_error() {
 
     // create an origin mapping
     let domain = "example.wh.soldr.dev";
-    let create_origin = CreateOrigin {
+    let create_origin = NewOrigin {
         domain: domain.to_string(),
         origin_uri: format!("http://localhost:{}", port),
-        timeout: None,
+        timeout: 100,
+        alert_threshold: Some(1),
+        alert_email: Some("error@example.com".to_string()),
+        smtp_host: Some("127.0.0.1".to_string()),
+        smtp_port: Some(2525),
+        smtp_username: None,
+        smtp_password: None,
+        smtp_tls: false,
     };
     let body = serde_json::to_string(&create_origin).unwrap();
     let response = mgmt
@@ -266,10 +277,11 @@ async fn ingest_proxy_timeout() {
 
     // create an origin mapping
     let domain = "example.wh.soldr.dev";
-    let create_origin = CreateOrigin {
+    let create_origin = NewOrigin {
         domain: domain.to_string(),
         origin_uri: format!("http://localhost:{}", port),
-        timeout: Some(5),
+        timeout: 5,
+        ..Default::default()
     };
     let body = serde_json::to_string(&create_origin).unwrap();
     let response = mgmt

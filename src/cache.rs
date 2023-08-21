@@ -1,8 +1,8 @@
-use crate::db::Origin;
 use parking_lot::RwLock;
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use crate::db::Origin;
 use crate::error::AppError;
 
 #[derive(Debug)]
