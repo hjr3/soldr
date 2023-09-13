@@ -20,3 +20,12 @@ toml = "0.7.5"
 parking_lot = "0.12.1"
 rand = "0.8.5"
 lettre = { version = "0.10.4", default-features = false, features = ["smtp-transport", "tokio1", "tokio1-rustls-tls", "builder"] }
+
+[dev-dependencies]
+criterion = {version = "0.4", features = ["async_tokio"]}
+reqwest = { version = "0.11", features = ["json"] }
+
+[[bench]]
+name = "soldr-benchmark"
+path = "benches/main.rs"
+harness = false
