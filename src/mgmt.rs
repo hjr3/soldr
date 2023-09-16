@@ -1,5 +1,6 @@
 use std::result::Result as StdResult;
 
+use anyhow::Result;
 use axum::extract::{Extension, Json};
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
@@ -61,10 +62,16 @@ async fn create_origin(
     let origin = db::insert_origin(&pool, new_origin).await?;
     tracing::debug!("response = {:?}", &origin);
 
-    let origins = db::list_origins(&pool).await?;
-    origin_cache.refresh(origins).unwrap();
+    update_origin_cache(&pool, &origin_cache).await?;
 
     Ok(Json(origin))
+}
+
+pub async fn update_origin_cache(pool: &SqlitePool, origin_cache: &OriginCache) -> Result<()> {
+    let origins = db::list_origins(pool).await?;
+    origin_cache.refresh(origins).unwrap();
+
+    Ok(())
 }
 
 #[derive(Debug, Deserialize, Serialize)]

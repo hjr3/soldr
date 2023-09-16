@@ -20,7 +20,7 @@ impl RetryQueue {
     }
 
     pub async fn start(&self) {
-        let mut interval = time::interval(Duration::from_secs(60));
+        let mut interval = time::interval(Duration::from_secs(1));
 
         loop {
             interval.tick().await;

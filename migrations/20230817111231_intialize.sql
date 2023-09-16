@@ -24,6 +24,8 @@ CREATE TABLE IF NOT EXISTS requests (
      created_at INTEGER NOT NULL,
      retry_ms_at INTEGER     
 );
+CREATE INDEX request_state_retry ON requests(state, retry_ms_at);
+CREATE INDEX request_state_created ON requests(state, created_at);
 
 CREATE TABLE IF NOT EXISTS attempts (
      id INTEGER PRIMARY KEY AUTOINCREMENT,

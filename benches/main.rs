@@ -21,9 +21,16 @@ async fn success_handler() -> impl axum::response::IntoResponse {
     "Hello, World!"
 }
 
-async fn do_bench(addr: SocketAddr, client: Rc<reqwest::Client>) {
+async fn failure_handler() -> impl axum::response::IntoResponse {
+    (
+        StatusCode::INTERNAL_SERVER_ERROR,
+        "unexpected error".to_string(),
+    )
+}
+
+async fn do_bench(addr: SocketAddr, client: Rc<reqwest::Client>, path: &str) {
     let domain = "example.wh.soldr.dev";
-    let url = format!("http://{}:{}/", addr.ip(), addr.port());
+    let url = format!("http://{}:{}{}", addr.ip(), addr.port(), path);
 
     let resp = client
         .post(url)
@@ -114,16 +121,85 @@ fn benchmark_proxy(c: &mut Criterion) {
     let mut group = c.benchmark_group("proxy");
     group.bench_function("empty post", |b| {
         b.to_async(&runtime)
-            .iter(|| do_bench(origin_addr, client.clone()));
+            .iter(|| do_bench(origin_addr, client.clone(), "/"));
     });
 
     let client = Rc::new(reqwest::Client::new());
     group.bench_function("proxy empty post", |b| {
         b.to_async(&runtime)
-            .iter(|| do_bench(ingest_addr, client.clone()));
+            .iter(|| do_bench(ingest_addr, client.clone(), "/"));
     });
     group.finish();
 }
 
-criterion_group!(benches, benchmark_proxy);
+fn benchmark_outage(c: &mut Criterion) {
+    let (_until_tx, until_rx) = oneshot::channel::<()>();
+    let (ingest_addr, origin_addr) = {
+        let (addr_tx, addr_rx) = mpsc::channel();
+        std::thread::spawn(move || {
+            let runtime = tokio::runtime::Runtime::new().unwrap();
+
+            let origin_listener =
+                TcpListener::bind("0.0.0.0:0".parse::<SocketAddr>().unwrap()).unwrap();
+            let origin_addr = origin_listener.local_addr().unwrap();
+            let port = origin_addr.port();
+            runtime.block_on(async {
+                // set up origin server
+                let client_app = Router::new()
+                    .route("/", post(success_handler))
+                    .route("/failure", post(failure_handler));
+
+                tokio::spawn(async move {
+                    axum::Server::from_tcp(origin_listener)
+                        .unwrap()
+                        .serve(client_app.into_make_service())
+                        .await
+                        .unwrap();
+                });
+            });
+
+            let ingest = runtime.block_on(setup(port));
+
+            let ingest_listener =
+                TcpListener::bind("0.0.0.0:0".parse::<SocketAddr>().unwrap()).unwrap();
+            let ingest_addr = ingest_listener.local_addr().unwrap();
+
+            runtime.spawn(async move {
+                axum::Server::from_tcp(ingest_listener)
+                    .unwrap()
+                    .serve(ingest.into_make_service())
+                    .await
+                    .unwrap();
+            });
+
+            addr_tx.send((ingest_addr, origin_addr)).unwrap();
+            runtime.block_on(until_rx).ok();
+        });
+
+        addr_rx.recv().unwrap()
+    };
+
+    let client = Rc::new(reqwest::Client::new());
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let mut group = c.benchmark_group("proxy");
+    group.bench_function("success", |b| {
+        b.to_async(&runtime)
+            .iter(|| do_bench(origin_addr, client.clone(), "/"));
+    });
+
+    let client = Rc::new(reqwest::Client::new());
+    group.bench_function("outage", |b| {
+        b.to_async(&runtime)
+            .iter(|| do_bench(ingest_addr, client.clone(), "/failure"));
+    });
+
+    let client = Rc::new(reqwest::Client::new());
+    group.bench_function("success after outage", |b| {
+        b.to_async(&runtime)
+            .iter(|| do_bench(ingest_addr, client.clone(), "/"));
+    });
+    group.finish();
+}
+
+criterion_group!(benches, benchmark_proxy, benchmark_outage);
 criterion_main!(benches);
