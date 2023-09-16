@@ -114,7 +114,7 @@ pub async fn insert_request(
         .bind(&req.uri)
         .bind(headers_json)
         .bind(&req.body)
-        .execute(&mut conn)
+        .execute(&mut *conn)
         .await
         .map_err(|err| {
             tracing::error!("Failed to save request. {:?}", &req);
@@ -145,7 +145,7 @@ pub async fn update_request_state(
     sqlx::query("UPDATE requests SET state = ? WHERE id = ?")
         .bind(state)
         .bind(req_id)
-        .execute(&mut conn)
+        .execute(&mut *conn)
         .await?;
 
     Ok(())
@@ -163,7 +163,7 @@ pub async fn retry_request(pool: &SqlitePool, req_id: i64, state: RequestState) 
 
     let retries = sqlx::query_scalar(query)
         .bind(req_id)
-        .fetch_one(&mut conn)
+        .fetch_one(&mut *conn)
         .await?;
 
     if retries > 19 {
@@ -188,7 +188,7 @@ pub async fn retry_request(pool: &SqlitePool, req_id: i64, state: RequestState) 
         .bind(state)
         .bind(retry_ms)
         .bind(req_id)
-        .execute(&mut conn)
+        .execute(&mut *conn)
         .await?;
 
     Ok(())
@@ -210,7 +210,7 @@ pub async fn attempts_reached_threshold(
 
     let count: i64 = sqlx::query_scalar(query)
         .bind(req_id)
-        .fetch_one(&mut conn)
+        .fetch_one(&mut *conn)
         .await?;
 
     Ok(count >= threshold.into())
@@ -237,7 +237,7 @@ pub async fn list_failed_requests(pool: &SqlitePool) -> Result<Vec<QueuedRequest
         .bind(RequestState::Failed)
         .bind(RequestState::Panic)
         .bind(RequestState::Timeout)
-        .fetch_all(&mut conn)
+        .fetch_all(&mut *conn)
         .await?;
 
     let queued_requests = requests
@@ -261,7 +261,7 @@ pub async fn list_requests(pool: &SqlitePool) -> Result<Vec<Request>> {
 
     let requests =
         sqlx::query_as::<_, Request>("SELECT * FROM requests ORDER BY id DESC LIMIT 10;")
-            .fetch_all(&mut conn)
+            .fetch_all(&mut *conn)
             .await?;
 
     Ok(requests)
@@ -296,7 +296,7 @@ pub async fn insert_attempt(
         .bind(request_id)
         .bind(response_status)
         .bind(response_body)
-        .execute(&mut conn)
+        .execute(&mut *conn)
         .await
         .map_err(|err| {
             tracing::error!(
@@ -317,7 +317,7 @@ pub async fn list_attempts(pool: &SqlitePool) -> Result<Vec<Attempt>> {
     let mut conn = pool.acquire().await?;
 
     let attempts = sqlx::query_as::<_, Attempt>("SELECT * FROM attempts ORDER BY id DESC;")
-        .fetch_all(&mut conn)
+        .fetch_all(&mut *conn)
         .await?;
 
     Ok(attempts)
@@ -392,7 +392,7 @@ pub async fn insert_origin(pool: &SqlitePool, origin: NewOrigin) -> Result<Origi
         .bind(origin.smtp_password)
         .bind(origin.smtp_port)
         .bind(origin.smtp_tls)
-        .fetch_one(&mut conn)
+        .fetch_one(&mut *conn)
         .await?;
 
     Ok(created_origin)
@@ -403,7 +403,7 @@ pub async fn list_origins(pool: &SqlitePool) -> Result<Vec<Origin>> {
     let mut conn = pool.acquire().await?;
 
     let origins = sqlx::query_as::<_, Origin>("SELECT * FROM origins;")
-        .fetch_all(&mut conn)
+        .fetch_all(&mut *conn)
         .await?;
 
     Ok(origins)
@@ -422,7 +422,7 @@ pub async fn purge_completed_requests(pool: &SqlitePool, days: u32) -> Result<()
     sqlx::query(query)
         .bind(RequestState::Completed)
         .bind(days)
-        .execute(&mut conn)
+        .execute(&mut *conn)
         .await?;
 
     Ok(())
@@ -444,7 +444,7 @@ pub async fn add_request_to_queue(pool: &SqlitePool, req_id: i64) -> Result<()> 
     sqlx::query(query)
         .bind(RequestState::Created)
         .bind(req_id)
-        .execute(&mut conn)
+        .execute(&mut *conn)
         .await?;
 
     Ok(())
