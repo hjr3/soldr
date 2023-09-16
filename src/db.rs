@@ -235,7 +235,6 @@ pub async fn list_failed_requests(pool: &SqlitePool) -> Result<Vec<QueuedRequest
         .fetch_all(&mut conn)
         .await?;
 
-    dbg!(&requests);
     let queued_requests = requests
         .into_iter()
         .map(|request| QueuedRequest {
