@@ -1,5 +1,7 @@
 use rand::Rng;
 
+// Retry 19 times over the next 48 hours
+// Result is returned in milliseconds
 pub fn backoff(retries: i32) -> i64 {
     let base: i64 = if retries > 19 {
         return 2851203;

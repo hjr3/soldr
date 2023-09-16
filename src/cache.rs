@@ -54,7 +54,7 @@ impl OriginCacheInner {
     }
 
     pub fn get(&self, domain: &str) -> Option<Origin> {
-        tracing::info!("Got called on cache for domain: {}", domain);
+        tracing::debug!("Got called on cache for domain: {}", domain);
         // Look up domain in the cache and clone if found
         let result = {
             let origins = self.origins.read();
@@ -64,9 +64,9 @@ impl OriginCacheInner {
 
         // Mostly for development, but also useful if you want to see how often the cache is hit
         if result.is_some() {
-            tracing::info!("Found origin in cache");
+            tracing::debug!("Found origin in cache");
         } else {
-            tracing::info!("Origin not found in cache");
+            tracing::warn!("Origin not found in cache");
         }
 
         // Return the result if found, otherwise None

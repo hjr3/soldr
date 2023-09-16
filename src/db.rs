@@ -220,11 +220,16 @@ pub async fn list_failed_requests(pool: &SqlitePool) -> Result<Vec<QueuedRequest
     tracing::trace!("list_failed_requests");
     let mut conn = pool.acquire().await?;
 
+    // FIXME - we currently tick the retry queue every second, so this effectively gives a
+    // rate limit of 5 requests per second. This should probably be configurable on a per-origin
+    // basis.
     let query = r#"
     SELECT *
     FROM requests
     WHERE state IN (?, ?, ?, ?)
         AND retry_ms_at <= strftime('%s','now') || substr(strftime('%f','now'), 4)
+    ORDER BY retry_ms_at ASC
+    LIMIT 5;
     "#;
 
     let requests = sqlx::query_as::<_, Request>(query)
