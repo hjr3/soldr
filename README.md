@@ -66,7 +66,7 @@ Create an origin so soldr knows how to route incoming requests:
 
 ```
 curl -vvv -H "Content-Type: application/json" localhost:3443/origins \
--d '{ "domain": "example.wh.soldr.dev", "origin_uri": "http://localhost:8080" }'
+-d '{ "domain": "example.wh.soldr.dev", "origin_uri": "http://localhost:8080", "timeout": 100 }'
 ```
 
 Send a request that will succeed:

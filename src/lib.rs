@@ -27,6 +27,7 @@ use sqlx::sqlite::SqlitePool;
 use crate::cache::OriginCache;
 use crate::db::ensure_schema;
 use crate::error::AppError;
+use crate::mgmt::update_origin_cache;
 use crate::proxy::{proxy, Client};
 use crate::request::HttpRequest;
 use crate::request::State as RequestState;
@@ -56,6 +57,7 @@ pub async fn app(config: &Config) -> Result<(Router, Router, RetryQueue)> {
     ensure_schema(&pool).await?;
 
     let origin_cache = OriginCache::new();
+    update_origin_cache(&pool, &origin_cache).await?;
 
     let mgmt_router = mgmt::router(pool.clone(), origin_cache.clone());
 

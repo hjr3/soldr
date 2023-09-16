@@ -323,12 +323,19 @@ pub struct NewOrigin {
     pub domain: String,
     pub origin_uri: String,
     pub timeout: u32,
+    #[serde(default)]
     pub alert_threshold: Option<u16>,
+    #[serde(default)]
     pub alert_email: Option<String>,
+    #[serde(default)]
     pub smtp_host: Option<String>,
+    #[serde(default)]
     pub smtp_username: Option<String>,
+    #[serde(default)]
     pub smtp_password: Option<String>,
+    #[serde(default)]
     pub smtp_port: Option<u16>,
+    #[serde(default)]
     pub smtp_tls: bool,
 }
 
