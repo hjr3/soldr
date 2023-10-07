@@ -13,7 +13,7 @@ use tokio::sync::Mutex;
 use tokio::time::{sleep, Duration};
 use tower::util::ServiceExt;
 
-use soldr::db::NewOrigin;
+use shared_types::NewOrigin;
 use soldr::{app, db};
 
 type Sentinel = Arc<Mutex<Option<Request<Body>>>>;

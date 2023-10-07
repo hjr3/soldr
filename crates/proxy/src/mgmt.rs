@@ -1,16 +1,18 @@
 use std::result::Result as StdResult;
 
 use anyhow::Result;
-use axum::extract::{Extension, Json};
+use axum::extract::{Extension, Json, Path};
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::{
-    routing::{get, post},
+    routing::{delete, get, post, put},
     Router,
 };
 use serde::{Deserialize, Serialize};
 use sqlx::sqlite::SqlitePool;
 use tracing::Level;
+
+use shared_types::{NewOrigin, Origin};
 
 use crate::cache::OriginCache;
 use crate::db;
@@ -18,7 +20,11 @@ use crate::error::AppError;
 
 pub fn router(pool: SqlitePool, origin_cache: OriginCache) -> Router {
     Router::new()
+        .route("/origins", get(list_origins))
         .route("/origins", post(create_origin))
+        .route("/origins/:id", get(get_origin))
+        .route("/origins/:id", put(update_origin))
+        .route("/origins/:id", delete(delete_origin))
         .route("/requests", get(list_requests))
         .route("/attempts", get(list_attempts))
         .route("/queue", post(add_request_to_queue))
@@ -50,11 +56,23 @@ async fn list_attempts(
     Ok(Json(attempts))
 }
 
+async fn list_origins(
+    Extension(pool): Extension<SqlitePool>,
+) -> StdResult<Json<Vec<Origin>>, AppError> {
+    let span = tracing::span!(Level::TRACE, "list_origins");
+    let _enter = span.enter();
+
+    let origins = db::list_origins(&pool).await?;
+    tracing::debug!("response = {:?}", &origins);
+
+    Ok(Json(origins))
+}
+
 async fn create_origin(
     Extension(pool): Extension<SqlitePool>,
     Extension(origin_cache): Extension<OriginCache>,
-    Json(new_origin): Json<db::NewOrigin>,
-) -> StdResult<Json<db::Origin>, AppError> {
+    Json(new_origin): Json<NewOrigin>,
+) -> StdResult<Json<Origin>, AppError> {
     let span = tracing::span!(Level::TRACE, "create_origin");
     let _enter = span.enter();
 
@@ -65,6 +83,55 @@ async fn create_origin(
     update_origin_cache(&pool, &origin_cache).await?;
 
     Ok(Json(origin))
+}
+
+async fn update_origin(
+    Extension(pool): Extension<SqlitePool>,
+    Extension(origin_cache): Extension<OriginCache>,
+    Path(id): Path<i64>,
+    Json(new_origin): Json<NewOrigin>,
+) -> StdResult<Json<Origin>, AppError> {
+    let span = tracing::span!(Level::TRACE, "update_origin");
+    let _enter = span.enter();
+
+    tracing::debug!("request payload = {:?}", &new_origin);
+    let origin = db::update_origin(&pool, id, new_origin).await?;
+    tracing::debug!("response = {:?}", &origin);
+
+    update_origin_cache(&pool, &origin_cache).await?;
+
+    Ok(Json(origin))
+}
+
+async fn get_origin(
+    Extension(pool): Extension<SqlitePool>,
+    Path(id): Path<i64>,
+) -> StdResult<Json<Origin>, AppError> {
+    let span = tracing::span!(Level::TRACE, "get_origin");
+    let _enter = span.enter();
+
+    tracing::debug!("origin id = {}", id);
+    let origin = db::get_origin(&pool, id).await?;
+    tracing::debug!("response = {:?}", &origin);
+
+    Ok(Json(origin))
+}
+
+async fn delete_origin(
+    Extension(pool): Extension<SqlitePool>,
+    Extension(origin_cache): Extension<OriginCache>,
+    Path(id): Path<i64>,
+) -> StdResult<impl IntoResponse, AppError> {
+    let span = tracing::span!(Level::TRACE, "delete_origin");
+    let _enter = span.enter();
+
+    tracing::debug!("origin id = {}", id);
+    let found = db::delete_origin(&pool, id).await?;
+    tracing::debug!("response = {:?}", found);
+
+    update_origin_cache(&pool, &origin_cache).await?;
+
+    Ok(StatusCode::ACCEPTED)
 }
 
 pub async fn update_origin_cache(pool: &SqlitePool, origin_cache: &OriginCache) -> Result<()> {

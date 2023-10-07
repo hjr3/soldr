@@ -10,7 +10,7 @@ use axum::{routing::post, Router};
 use soldr::db::RequestState;
 use tower::util::ServiceExt;
 
-use soldr::db::NewOrigin;
+use shared_types::NewOrigin;
 use soldr::mgmt::NewQueueRequest;
 use soldr::{app, db};
 

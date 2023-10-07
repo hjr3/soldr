@@ -1,24 +1,11 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
-use sqlx::sqlite::SqlitePool;
+use sqlx::sqlite::{SqlitePool, SqliteQueryResult};
+
+use shared_types::{NewOrigin, Origin};
 
 use crate::request::HttpRequest;
 use crate::retry::backoff;
-
-#[derive(Debug, Deserialize, Serialize, sqlx::FromRow, Clone)]
-pub struct Origin {
-    pub id: i64,
-    pub domain: String,
-    pub origin_uri: String,
-    pub timeout: u32,
-    pub alert_threshold: Option<u16>,
-    pub alert_email: Option<String>,
-    pub smtp_host: Option<String>,
-    pub smtp_username: Option<String>,
-    pub smtp_password: Option<String>,
-    pub smtp_port: Option<u16>,
-    pub smtp_tls: bool,
-}
 
 #[derive(Debug)]
 pub struct QueuedRequest {
@@ -323,27 +310,6 @@ pub async fn list_attempts(pool: &SqlitePool) -> Result<Vec<Attempt>> {
     Ok(attempts)
 }
 
-#[derive(Debug, Default, Deserialize, Serialize)]
-pub struct NewOrigin {
-    pub domain: String,
-    pub origin_uri: String,
-    pub timeout: u32,
-    #[serde(default)]
-    pub alert_threshold: Option<u16>,
-    #[serde(default)]
-    pub alert_email: Option<String>,
-    #[serde(default)]
-    pub smtp_host: Option<String>,
-    #[serde(default)]
-    pub smtp_username: Option<String>,
-    #[serde(default)]
-    pub smtp_password: Option<String>,
-    #[serde(default)]
-    pub smtp_port: Option<u16>,
-    #[serde(default)]
-    pub smtp_tls: bool,
-}
-
 pub async fn insert_origin(pool: &SqlitePool, origin: NewOrigin) -> Result<Origin> {
     tracing::trace!("insert_origin");
     let mut conn = pool.acquire().await?;
@@ -398,6 +364,46 @@ pub async fn insert_origin(pool: &SqlitePool, origin: NewOrigin) -> Result<Origi
     Ok(created_origin)
 }
 
+pub async fn update_origin(pool: &SqlitePool, id: i64, origin: NewOrigin) -> Result<Origin> {
+    tracing::trace!("update_origin");
+    let mut conn = pool.acquire().await?;
+
+    let query = r#"
+        UPDATE origins
+        SET
+            domain = ?,
+            origin_uri = ?,
+            timeout = ?,
+            alert_threshold = ?,
+            alert_email = ?,
+            smtp_host = ?,
+            smtp_username = ?,
+            smtp_password = ?,
+            smtp_port = ?,
+            smtp_tls = ?,
+            updated_at = strftime('%s','now')
+        WHERE id = ?
+        RETURNING *
+    "#;
+
+    let updated_origin = sqlx::query_as::<_, Origin>(query)
+        .bind(origin.domain)
+        .bind(origin.origin_uri)
+        .bind(origin.timeout)
+        .bind(origin.alert_threshold)
+        .bind(origin.alert_email)
+        .bind(origin.smtp_host)
+        .bind(origin.smtp_username)
+        .bind(origin.smtp_password)
+        .bind(origin.smtp_port)
+        .bind(origin.smtp_tls)
+        .bind(id)
+        .fetch_one(&mut *conn)
+        .await?;
+
+    Ok(updated_origin)
+}
+
 pub async fn list_origins(pool: &SqlitePool) -> Result<Vec<Origin>> {
     tracing::trace!("list_origins");
     let mut conn = pool.acquire().await?;
@@ -407,6 +413,32 @@ pub async fn list_origins(pool: &SqlitePool) -> Result<Vec<Origin>> {
         .await?;
 
     Ok(origins)
+}
+
+pub async fn get_origin(pool: &SqlitePool, id: i64) -> Result<Origin> {
+    tracing::trace!("get_origin");
+    let mut conn = pool.acquire().await?;
+
+    let origin = sqlx::query_as::<_, Origin>("SELECT * FROM origins WHERE id = ?;")
+        .bind(id)
+        .fetch_one(&mut *conn)
+        .await?;
+
+    Ok(origin)
+}
+
+pub async fn delete_origin(pool: &SqlitePool, id: i64) -> Result<bool> {
+    tracing::trace!("delete origin");
+    let mut conn = pool.acquire().await?;
+
+    let query = r#"
+        DELETE FROM origins
+        WHERE id = ?;
+    "#;
+
+    let result: SqliteQueryResult = sqlx::query(query).bind(id).execute(&mut *conn).await?;
+
+    Ok(result.rows_affected() > 0)
 }
 
 pub async fn purge_completed_requests(pool: &SqlitePool, days: u32) -> Result<()> {
