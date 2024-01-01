@@ -13,6 +13,8 @@ pub struct Origin {
     pub smtp_password: Option<String>,
     pub smtp_port: Option<u16>,
     pub smtp_tls: bool,
+    pub created_at: i64,
+    pub updated_at: i64,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, sqlx::Type, Eq, PartialEq)]
@@ -46,6 +48,7 @@ pub struct Request {
     pub headers: String,
     pub body: Option<Vec<u8>>,
     pub state: RequestState,
+    pub created_at: i64,
     pub retry_ms_at: i64,
 }
 

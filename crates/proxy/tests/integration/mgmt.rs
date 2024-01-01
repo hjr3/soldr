@@ -16,7 +16,8 @@ async fn mgmt_list_requests() {
         .oneshot(
             Request::builder()
                 .method("GET")
-                .uri("/requests")
+                // /requests?filter={}&range=[0,9]&sort=["id","ASC"]
+                .uri(r#"/requests?filter=%7B%7D&range=%5B0,9%5D&sort=%5B%22id%22,%22ASC%22%5D"#)
                 .body(Body::empty())
                 .unwrap(),
         )

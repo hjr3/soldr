@@ -1,11 +1,18 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use sqlx::sqlite::{SqlitePool, SqliteQueryResult};
+use sqlx::{query_builder::QueryBuilder, FromRow, Row};
 
 use shared_types::{NewOrigin, Origin};
 
 use crate::request::HttpRequest;
 use crate::retry::backoff;
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct GetListResponse<T> {
+    pub total: i64,
+    pub items: Vec<T>,
+}
 
 #[derive(Debug)]
 pub struct QueuedRequest {
@@ -48,6 +55,7 @@ pub struct Request {
     pub headers: String,
     pub body: Option<Vec<u8>>,
     pub state: RequestState,
+    pub created_at: i64,
     pub retry_ms_at: i64,
 }
 
@@ -57,6 +65,7 @@ pub struct Attempt {
     pub request_id: i64,
     pub response_status: i64,
     pub response_body: Vec<u8>,
+    pub created_at: i64,
 }
 
 pub async fn ensure_schema(pool: &SqlitePool) -> Result<()> {
@@ -242,16 +251,58 @@ pub async fn list_failed_requests(pool: &SqlitePool) -> Result<Vec<QueuedRequest
     Ok(queued_requests)
 }
 
-pub async fn list_requests(pool: &SqlitePool) -> Result<Vec<Request>> {
+pub async fn list_requests(
+    pool: &SqlitePool,
+    start: u32,
+    end: u32,
+    field: &str,
+    order: &str,
+    states: Option<Vec<RequestState>>,
+) -> Result<GetListResponse<Request>> {
     tracing::trace!("list_requests");
     let mut conn = pool.acquire().await?;
 
-    let requests =
-        sqlx::query_as::<_, Request>("SELECT * FROM requests ORDER BY id DESC LIMIT 10;")
-            .fetch_all(&mut *conn)
-            .await?;
+    let mut q = QueryBuilder::new("SELECT *, COUNT(*) OVER() AS total FROM requests");
 
-    Ok(requests)
+    if let Some(states) = states {
+        q.push(" WHERE state IN (");
+        for (i, state) in states.iter().enumerate() {
+            q.push_bind(*state);
+            if i < states.len() - 1 {
+                q.push(", ");
+            }
+        }
+        q.push(")");
+    }
+
+    q.push(" ORDER BY ");
+    q.push_bind(field);
+
+    q.push(&format!(" {} LIMIT ", order));
+    q.push_bind(end - start + 1);
+    q.push(" OFFSET ");
+    q.push_bind(start);
+
+    let q = q.build();
+    let rows = q.fetch_all(&mut *conn).await?;
+
+    let total = if rows.is_empty() {
+        0
+    } else {
+        rows.get(0)
+            .map(|row| row.try_get("total"))
+            .context("Failed to get total count of requests.")??
+    };
+
+    let requests: Vec<Request> = rows
+        .into_iter()
+        .map(|row| Request::from_row(&row))
+        .collect::<Result<Vec<_>, _>>()?;
+
+    Ok(GetListResponse {
+        total,
+        items: requests,
+    })
 }
 
 pub async fn insert_attempt(
@@ -299,15 +350,52 @@ pub async fn insert_attempt(
     Ok(id)
 }
 
-pub async fn list_attempts(pool: &SqlitePool) -> Result<Vec<Attempt>> {
+pub async fn list_attempts(
+    pool: &SqlitePool,
+    start: u32,
+    end: u32,
+    field: &str,
+    order: &str,
+    request_id: Option<i64>,
+) -> Result<GetListResponse<Attempt>> {
     tracing::trace!("list_attempts");
     let mut conn = pool.acquire().await?;
 
-    let attempts = sqlx::query_as::<_, Attempt>("SELECT * FROM attempts ORDER BY id DESC;")
-        .fetch_all(&mut *conn)
-        .await?;
+    let mut q = QueryBuilder::new("SELECT *, COUNT(*) OVER() AS total FROM attempts");
 
-    Ok(attempts)
+    if let Some(request_id) = request_id {
+        q.push(" WHERE request_id = ");
+        q.push_bind(request_id);
+    }
+
+    q.push(" ORDER BY ");
+    q.push_bind(field);
+
+    q.push(&format!(" {} LIMIT ", order));
+    q.push_bind(end - start + 1);
+    q.push(" OFFSET ");
+    q.push_bind(start);
+
+    let q = q.build();
+    let rows = q.fetch_all(&mut *conn).await?;
+
+    let total = if rows.is_empty() {
+        0
+    } else {
+        rows.get(0)
+            .map(|row| row.try_get("total"))
+            .context("Failed to get total count of attempts.")??
+    };
+
+    let attempts: Vec<Attempt> = rows
+        .into_iter()
+        .map(|row| Attempt::from_row(&row))
+        .collect::<Result<Vec<_>, _>>()?;
+
+    Ok(GetListResponse {
+        total,
+        items: attempts,
+    })
 }
 
 pub async fn insert_origin(pool: &SqlitePool, origin: NewOrigin) -> Result<Origin> {
@@ -404,15 +492,44 @@ pub async fn update_origin(pool: &SqlitePool, id: i64, origin: NewOrigin) -> Res
     Ok(updated_origin)
 }
 
-pub async fn list_origins(pool: &SqlitePool) -> Result<Vec<Origin>> {
+pub async fn list_origins(
+    pool: &SqlitePool,
+    start: u32,
+    end: u32,
+    field: &str,
+    order: &str,
+) -> Result<GetListResponse<Origin>> {
     tracing::trace!("list_origins");
     let mut conn = pool.acquire().await?;
 
-    let origins = sqlx::query_as::<_, Origin>("SELECT * FROM origins;")
+    let q = format!(
+        "SELECT *, COUNT(*) OVER() AS total FROM origins ORDER BY ? {} LIMIT ? OFFSET ?;",
+        order
+    );
+    let rows = sqlx::query(&q)
+        .bind(field)
+        .bind(end - start + 1)
+        .bind(start)
         .fetch_all(&mut *conn)
         .await?;
 
-    Ok(origins)
+    let total = if rows.is_empty() {
+        0
+    } else {
+        rows.get(0)
+            .map(|row| row.try_get("total"))
+            .context("Failed to get total count of origins.")??
+    };
+
+    let origins: Vec<Origin> = rows
+        .into_iter()
+        .map(|row| Origin::from_row(&row))
+        .collect::<Result<Vec<_>, _>>()?;
+
+    Ok(GetListResponse {
+        total,
+        items: origins,
+    })
 }
 
 pub async fn get_origin(pool: &SqlitePool, id: i64) -> Result<Origin> {
@@ -480,4 +597,28 @@ pub async fn add_request_to_queue(pool: &SqlitePool, req_id: i64) -> Result<()> 
         .await?;
 
     Ok(())
+}
+
+pub async fn get_request(pool: &SqlitePool, id: i64) -> Result<Request> {
+    tracing::trace!("get_origin");
+    let mut conn = pool.acquire().await?;
+
+    let request = sqlx::query_as::<_, Request>("SELECT * FROM requests WHERE id = ?;")
+        .bind(id)
+        .fetch_one(&mut *conn)
+        .await?;
+
+    Ok(request)
+}
+
+pub async fn get_attempt(pool: &SqlitePool, id: i64) -> Result<Attempt> {
+    tracing::trace!("get_origin");
+    let mut conn = pool.acquire().await?;
+
+    let attempt = sqlx::query_as::<_, Attempt>("SELECT * FROM attempts WHERE id = ?;")
+        .bind(id)
+        .fetch_one(&mut *conn)
+        .await?;
+
+    Ok(attempt)
 }

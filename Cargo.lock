@@ -242,6 +242,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "bpaf"
+version = "0.9.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "19232d7d855392d993f6dabd8dea40a457a6d24ef679fe98f5edca811bb11e21"
+
+[[package]]
 name = "bumpalo"
 version = "3.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2710,6 +2716,7 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "axum",
+ "bpaf",
  "maud",
  "reqwest",
  "serde",
