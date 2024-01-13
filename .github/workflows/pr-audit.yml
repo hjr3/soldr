@@ -26,4 +26,5 @@ jobs:
 
       - name: Audit dependencies
         # RUSTSEC-2021-0145 is caused by criterion and is a dev only dependency
-        run: cargo audit -D warnings --ignore RUSTSEC-2021-0145
+        # RUSTSEC-2023-0071 is caused by a sqlx dependency. no current fix
+        run: cargo audit -D warnings --ignore RUSTSEC-2021-0145 --ignore RUSTSEC-2023-0071
