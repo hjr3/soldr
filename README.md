@@ -86,6 +86,30 @@ This request will be retried repeatedly by the retry queue.
 
 In the terminal window running soldr, you will see a lot of tracing output that demonstrates how soldr is running.
 
+### Management UI
+
+The management UI makes it easier to manage the proxy settings and troubleshoot issues. It runs independently of the proxy server. It requires a URL to the management API.
+
+Start the proxy server:
+
+```
+RUST_LOG=soldr=info cargo run -- --config-path=soldr.example.toml
+     Running `target/debug/soldr --config-path=soldr.example.toml`
+2024-01-01T20:30:23.213548Z  INFO soldr: starting retry queue
+2024-01-01T20:30:23.213548Z  INFO soldr: ingest listening on 0.0.0.0:3000
+2024-01-01T20:30:23.213549Z  INFO soldr: management API listening on 0.0.0.0:3443
+```
+
+The management API is listening on port 3443. We can run the UI local to the server like this:
+
+```
+RUST_LOG=ui=info cargo run --bin ui -- --api-url=http://localhost:3443
+   Compiling ui v0.0.0 (/Users/herman/Code/soldr/crates/ui)
+    Finished dev [unoptimized + debuginfo] target(s) in 3.26s
+     Running `/Users/herman/Code/soldr/target/debug/ui '--api-url=http://localhost:3443'`
+2024-01-13T17:09:52.115907Z  INFO ui: listening on 127.0.0.1:8888
+```
+
 ## Use Cases
 
 - You have a service that sends transactional emails to an email service provider (ESP) and your ESP has planned (or unplanned!) downtime. Soldr will alert you, queue your messages and retry them until the service comes back up.

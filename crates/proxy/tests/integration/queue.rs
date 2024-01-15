@@ -10,7 +10,7 @@ use axum::{routing::post, Router};
 use soldr::db::RequestState;
 use tower::util::ServiceExt;
 
-use soldr::db::NewOrigin;
+use shared_types::NewOrigin;
 use soldr::mgmt::NewQueueRequest;
 use soldr::{app, db};
 
@@ -87,7 +87,8 @@ async fn queue_retry_request() {
         .oneshot(
             Request::builder()
                 .method("GET")
-                .uri("/requests")
+                // /requests?filter={}&range=[0,9]&sort=["id","ASC"]
+                .uri(r#"/requests?filter=%7B%7D&range=%5B0,9%5D&sort=%5B%22id%22,%22ASC%22%5D"#)
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -107,7 +108,8 @@ async fn queue_retry_request() {
         .oneshot(
             Request::builder()
                 .method("GET")
-                .uri("/attempts")
+                // /attempts?filter={}&range=[0,9]&sort=["id","ASC"]
+                .uri("/attempts?filter=%7B%7D&range=%5B0,9%5D&sort=%5B%22id%22,%22ASC%22%5D")
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -152,7 +154,8 @@ async fn queue_retry_request() {
         .oneshot(
             Request::builder()
                 .method("GET")
-                .uri("/attempts")
+                // /attempts?filter={}&range=[0,9]&sort=["id","ASC"]
+                .uri("/attempts?filter=%7B%7D&range=%5B0,9%5D&sort=%5B%22id%22,%22ASC%22%5D")
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -164,8 +167,8 @@ async fn queue_retry_request() {
     let body = hyper::body::to_bytes(response.into_body()).await.unwrap();
 
     let attempts: Vec<db::Attempt> = serde_json::from_slice(&body).unwrap();
-    assert_eq!(attempts[0].id, 2);
-    assert_eq!(attempts[0].request_id, 1);
+    assert_eq!(attempts[1].id, 2);
+    assert_eq!(attempts[1].request_id, 1);
 
     // use management API to verify retry_at is set
     let response = mgmt
@@ -173,7 +176,8 @@ async fn queue_retry_request() {
         .oneshot(
             Request::builder()
                 .method("GET")
-                .uri("/requests")
+                // /requests?filter={}&range=[0,9]&sort=["id","ASC"]
+                .uri(r#"/requests?filter=%7B%7D&range=%5B0,9%5D&sort=%5B%22id%22,%22ASC%22%5D"#)
                 .body(Body::empty())
                 .unwrap(),
         )

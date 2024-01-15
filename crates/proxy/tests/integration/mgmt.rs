@@ -5,8 +5,8 @@ use axum::http::Request;
 use axum::http::StatusCode;
 use tower::util::ServiceExt;
 
-use soldr::db::NewOrigin;
-use soldr::{app, db};
+use shared_types::{NewOrigin, Origin};
+use soldr::app;
 
 #[tokio::test]
 async fn mgmt_list_requests() {
@@ -16,7 +16,8 @@ async fn mgmt_list_requests() {
         .oneshot(
             Request::builder()
                 .method("GET")
-                .uri("/requests")
+                // /requests?filter={}&range=[0,9]&sort=["id","ASC"]
+                .uri(r#"/requests?filter=%7B%7D&range=%5B0,9%5D&sort=%5B%22id%22,%22ASC%22%5D"#)
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -55,7 +56,7 @@ async fn mgmt_create_origin() {
     assert_eq!(response.status(), StatusCode::OK);
 
     let body = hyper::body::to_bytes(response.into_body()).await.unwrap();
-    let origin: db::Origin = serde_json::from_slice(&body).unwrap();
+    let origin: Origin = serde_json::from_slice(&body).unwrap();
     assert_eq!(origin.id, 1);
     assert_eq!(origin.domain, create_origin.domain);
     assert_eq!(origin.origin_uri, create_origin.origin_uri);

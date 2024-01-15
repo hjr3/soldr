@@ -21,6 +21,9 @@ jobs:
           - stable
     steps:
       - uses: actions/checkout@v3
+      - uses: actions/setup-node@v3
+      - uses: extractions/setup-just@v1
+      - run: just install build-ui
       - run: rustup update ${{ matrix.toolchain }} && rustup default ${{ matrix.toolchain }}
       - run: cargo build --verbose
       - run: cargo test --verbose
