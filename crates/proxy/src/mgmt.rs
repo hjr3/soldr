@@ -374,6 +374,11 @@ pub struct NewQueueRequest {
     pub req_id: i64,
 }
 
+#[derive(Debug, Serialize)]
+struct NewQueueResponse {
+    id: i64,
+}
+
 async fn add_request_to_queue(
     Extension(pool): Extension<SqlitePool>,
     Json(payload): Json<NewQueueRequest>,
@@ -383,7 +388,7 @@ async fn add_request_to_queue(
 
     db::add_request_to_queue(&pool, payload.req_id).await?;
 
-    Ok(StatusCode::ACCEPTED)
+    Ok(Json(NewQueueResponse { id: payload.req_id }))
 }
 
 async fn get_request(

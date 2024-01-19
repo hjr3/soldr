@@ -1,6 +1,7 @@
 import { List, Datagrid, TextField, SelectArrayInput } from 'react-admin';
 import ConditionalDateField from '../ConditionalDateField';
 import DateFieldSec from '../DateFieldSec';
+import RetryButton from './RetryButton';
 
 const filters = [
   <SelectArrayInput
@@ -21,9 +22,11 @@ const filters = [
   />,
 ];
 
+const PostBulkActionButtons = () => <RetryButton />;
+
 export const RequestsList = () => (
   <List filters={filters}>
-    <Datagrid rowClick="show" bulkActionButtons={false}>
+    <Datagrid rowClick="show" bulkActionButtons={<PostBulkActionButtons />}>
       <TextField source="id" />
       <TextField source="method" />
       <TextField source="uri" />

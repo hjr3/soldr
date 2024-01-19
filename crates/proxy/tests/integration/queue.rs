@@ -144,7 +144,7 @@ async fn queue_retry_request() {
         )
         .await
         .unwrap();
-    assert_eq!(response.status(), StatusCode::ACCEPTED);
+    assert_eq!(response.status(), StatusCode::OK);
 
     retry_queue.tick().await;
 

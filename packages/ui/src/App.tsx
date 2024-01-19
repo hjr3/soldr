@@ -28,6 +28,7 @@ const App = () => (
     <Resource name="origins" {...Origins} />
     <Resource name="requests" {...Requests} />
     <Resource name="attempts" {...Attempts} />
+    <Resource name="queue" />
   </Admin>
 );
 
