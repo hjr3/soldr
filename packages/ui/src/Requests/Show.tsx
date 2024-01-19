@@ -1,9 +1,44 @@
-import { Show, SimpleShowLayout, TextField, Datagrid, ReferenceManyField } from 'react-admin';
+import {
+  Button,
+  Show,
+  SimpleShowLayout,
+  TextField,
+  Datagrid,
+  ReferenceManyField,
+  useCreate,
+  useNotify,
+  useShowContext,
+} from 'react-admin';
+import ReplayIcon from '@mui/icons-material/Replay';
 import ConditionalDateField from '../ConditionalDateField';
 import DateFieldSec from '../DateFieldSec';
+import { EditButton, TopToolbar } from 'react-admin';
+
+const RequestShowActions = () => {
+  const notify = useNotify();
+  const { record } = useShowContext();
+  const [create, { isLoading }] = useCreate();
+
+  const handleClick = () => {
+    create('queue', { data: { req_id: record.id } }, { returnPromise: true })
+      .then(() => {
+        notify('Requests added to retry queue');
+      })
+      .catch(() => notify('Error: requests not retried', { type: 'error' }));
+  };
+
+  return (
+    <TopToolbar>
+      <EditButton />
+      <Button color="primary" label="Retry Requests" disabled={isLoading} onClick={handleClick}>
+        <ReplayIcon />
+      </Button>
+    </TopToolbar>
+  );
+};
 
 export const RequestsShow = () => (
-  <Show>
+  <Show actions={<RequestShowActions />}>
     <SimpleShowLayout>
       <TextField source="id" />
       <TextField source="method" />
