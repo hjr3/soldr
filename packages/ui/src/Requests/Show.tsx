@@ -52,7 +52,12 @@ export const RequestsShow = () => (
         showTime
         emptyText="Not scheduled"
       />
-      <ReferenceManyField label="Attempts" reference="attempts" target="request_id" perPage={20}>
+      <ReferenceManyField
+        label="Recent Attempts (50 max)"
+        reference="attempts"
+        target="request_id"
+        perPage={50}
+      >
         <Datagrid rowClick="show" bulkActionButtons={false}>
           <TextField source="id" />
           <TextField source="response_status" />
