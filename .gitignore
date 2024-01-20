@@ -1,3 +1,4 @@
 target
 soldr.db
 crates/ui/static
+index.html
