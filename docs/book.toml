@@ -1,0 +1,24 @@
+[book]
+authors = ["Herman J. Radtke III"]
+language = "en"
+multilingual = false
+src = "src"
+title = "Soldr"
+
+
+[preprocessor.mermaid]
+command = "mdbook-mermaid"
+
+[output.html]
+git-repository-url = "https://github.com/hjr3/soldr/tree/main/docs"
+edit-url-template = "https://github.com/hjr3/soldr/edit/main/docs/{path}"
+additional-js = ["mermaid.min.js", "mermaid-init.js"]
+
+[output.html.search]
+limit-results = 20
+use-boolean-and = true
+boost-title = 2
+boost-hierarchy = 2
+boost-paragraph = 1
+expand = true
+heading-split-level = 2
