@@ -28,43 +28,47 @@ struct Range {
 
 #[derive(Deserialize)]
 struct RangeParams {
-    range: String,
+    range: Option<String>,
 }
 
 impl RangeParams {
     fn parse_range(&self) -> StdResult<Range, AppError> {
-        let values: Vec<&str> = self
-            .range
-            .trim_matches(|p| p == '[' || p == ']')
-            .split(',')
-            .collect();
+        match self.range {
+            Some(ref range) => {
+                let values: Vec<&str> = range
+                    .trim_matches(|p| p == '[' || p == ']')
+                    .split(',')
+                    .collect();
 
-        if values.len() != 2 {
-            return Err(anyhow::anyhow!("Invalid range parameter").into());
+                if values.len() != 2 {
+                    return Err(anyhow::anyhow!("Invalid range parameter").into());
+                }
+
+                let start = values[0].trim().parse()?;
+                let end = values[1].trim().parse()?;
+
+                if start > end {
+                    return Err(anyhow::anyhow!("Start cannot be greater than end").into());
+                }
+
+                // 50 is the max per page that react admin allows
+                if end - start > 50 {
+                    return Err(anyhow::anyhow!("Range cannot be greater than 50").into());
+                }
+
+                // anything past 1,000 should be using a filter instead
+                if start > 1000 {
+                    return Err(anyhow::anyhow!("Start cannot be greater than 100").into());
+                }
+
+                if end > 1000 {
+                    return Err(anyhow::anyhow!("End cannot be greater than 100").into());
+                }
+
+                Ok(Range { start, end })
+            }
+            None => Ok(Range { start: 0, end: 9 }),
         }
-
-        let start = values[0].trim().parse()?;
-        let end = values[1].trim().parse()?;
-
-        if start > end {
-            return Err(anyhow::anyhow!("Start cannot be greater than end").into());
-        }
-
-        // 50 is the max per page that react admin allows
-        if end - start > 50 {
-            return Err(anyhow::anyhow!("Range cannot be greater than 50").into());
-        }
-
-        // anything past 1,000 should be using a filter instead
-        if start > 1000 {
-            return Err(anyhow::anyhow!("Start cannot be greater than 100").into());
-        }
-
-        if end > 1000 {
-            return Err(anyhow::anyhow!("End cannot be greater than 100").into());
-        }
-
-        Ok(Range { start, end })
     }
 }
 
@@ -91,27 +95,35 @@ struct Sort {
 
 #[derive(Deserialize)]
 struct SortParams {
-    sort: String,
+    sort: Option<String>,
 }
 
 impl SortParams {
     fn parse_sort(&self) -> StdResult<Sort, AppError> {
-        let values: Vec<String> = serde_json::from_str(&self.sort)?;
-        if values.len() != 2 {
-            return Err(anyhow::anyhow!("Invalid sort format").into());
+        match self.sort {
+            None => Ok(Sort {
+                field: "id".to_string(),
+                order: Order::Desc,
+            }),
+            Some(ref sort) => {
+                let values: Vec<String> = serde_json::from_str(sort)?;
+                if values.len() != 2 {
+                    return Err(anyhow::anyhow!("Invalid sort format").into());
+                }
+
+                let field = values[0].clone();
+
+                let order = if &values[1] == "ASC" {
+                    Order::Asc
+                } else if &values[1] == "DESC" {
+                    Order::Desc
+                } else {
+                    return Err(anyhow::anyhow!("Invalid sort order").into());
+                };
+
+                Ok(Sort { field, order })
+            }
         }
-
-        let field = values[0].clone();
-
-        let order = if &values[1] == "ASC" {
-            Order::Asc
-        } else if &values[1] == "DESC" {
-            Order::Desc
-        } else {
-            return Err(anyhow::anyhow!("Invalid sort order").into());
-        };
-
-        Ok(Sort { field, order })
     }
 }
 
@@ -124,6 +136,7 @@ pub fn router(pool: SqlitePool, origin_cache: OriginCache) -> Router {
         .route("/origins/:id", delete(delete_origin))
         .route("/requests", get(list_requests))
         .route("/requests/:id", get(get_request))
+        .route("/requests/:id", put(update_request))
         .route("/attempts", get(list_attempts))
         .route("/attempts/:id", get(get_attempt))
         .route("/queue", post(add_request_to_queue))
@@ -135,43 +148,59 @@ pub fn router(pool: SqlitePool, origin_cache: OriginCache) -> Router {
 
 #[derive(Debug, Deserialize)]
 struct RequestsFilterIr {
+    id: Option<Vec<i64>>,
     state: Option<Vec<i8>>,
 }
 
 #[derive(Debug, Deserialize)]
 struct RequestsFilter {
+    id: Option<Vec<i64>>,
     state: Option<Vec<db::RequestState>>,
 }
 
 #[derive(Debug, Deserialize)]
 struct RequestsFilterQuery {
-    filter: String,
+    filter: Option<String>,
 }
 
 impl RequestsFilterQuery {
     fn parse_filter(&self) -> StdResult<RequestsFilter, AppError> {
-        let filter: RequestsFilterIr = serde_json::from_str(&self.filter)?;
+        let mut requests_filter = RequestsFilter {
+            state: None,
+            id: None,
+        };
 
-        if let Some(state) = &filter.state {
-            let state: Vec<db::RequestState> = state
-                .iter()
-                .filter_map(|&state| match state {
-                    0 => Some(db::RequestState::Received),
-                    1 => Some(db::RequestState::Created),
-                    2 => Some(db::RequestState::Enqueued),
-                    3 => Some(db::RequestState::Active),
-                    4 => Some(db::RequestState::Completed),
-                    5 => Some(db::RequestState::Failed),
-                    6 => Some(db::RequestState::Panic),
-                    7 => Some(db::RequestState::Timeout),
-                    8 => Some(db::RequestState::Skipped),
-                    _ => None,
-                })
-                .collect();
+        match &self.filter {
+            None => return Ok(requests_filter),
+            Some(ref filter) => {
+                let filter: RequestsFilterIr = serde_json::from_str(filter)?;
 
-            Ok(RequestsFilter { state: Some(state) })
-        } else {
-            Ok(RequestsFilter { state: None })
+                if let Some(state) = &filter.state {
+                    let state: Vec<db::RequestState> = state
+                        .iter()
+                        .filter_map(|&state| match state {
+                            0 => Some(db::RequestState::Received),
+                            1 => Some(db::RequestState::Created),
+                            2 => Some(db::RequestState::Enqueued),
+                            3 => Some(db::RequestState::Active),
+                            4 => Some(db::RequestState::Completed),
+                            5 => Some(db::RequestState::Failed),
+                            6 => Some(db::RequestState::Panic),
+                            7 => Some(db::RequestState::Timeout),
+                            8 => Some(db::RequestState::Skipped),
+                            _ => None,
+                        })
+                        .collect();
+
+                    requests_filter.state = Some(state);
+                }
+
+                if let Some(id) = filter.id {
+                    requests_filter.id = Some(id);
+                }
+
+                Ok(requests_filter)
+            }
         }
     }
 }
@@ -196,6 +225,7 @@ async fn list_requests(
         &sort.field,
         sort.order.as_str(),
         filter.state,
+        filter.id,
     )
     .await?;
     let reqs = list_response.items;
@@ -405,6 +435,22 @@ async fn get_request(
     Ok(Json(request))
 }
 
+// Requests are immutable, so create a new request from this one
+async fn update_request(
+    Extension(pool): Extension<SqlitePool>,
+    Path(id): Path<i64>,
+    Json(update_request): Json<db::UpdateRequest>,
+) -> StdResult<Json<db::Request>, AppError> {
+    let span = tracing::span!(Level::TRACE, "update_request");
+    let _enter = span.enter();
+
+    tracing::debug!("request payload = {:?}", &update_request);
+    let request = db::update_request(&pool, id, update_request).await?;
+    tracing::debug!("response = {:?}", &request);
+
+    Ok(Json(request))
+}
+
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Attempt {
     pub id: i64,
@@ -417,20 +463,12 @@ pub struct Attempt {
 async fn get_attempt(
     Extension(pool): Extension<SqlitePool>,
     Path(id): Path<i64>,
-) -> StdResult<Json<Attempt>, AppError> {
+) -> StdResult<Json<db::Attempt>, AppError> {
     let span = tracing::span!(Level::TRACE, "get_attempt");
     let _enter = span.enter();
 
     tracing::debug!("attempt id = {}", id);
-    let db_attempt = db::get_attempt(&pool, id).await?;
-    // TODO - we should probably not looking at the response content-type header
-    let attempt = Attempt {
-        id: db_attempt.id,
-        request_id: db_attempt.request_id,
-        response_status: db_attempt.response_status,
-        response_body: String::from_utf8_lossy(&db_attempt.response_body).to_string(),
-        created_at: db_attempt.created_at,
-    };
+    let attempt = db::get_attempt(&pool, id).await?;
     tracing::debug!("response = {:?}", &attempt);
 
     Ok(Json(attempt))

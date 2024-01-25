@@ -22,7 +22,8 @@ CREATE TABLE IF NOT EXISTS requests (
      body TEXT,
      state INT(1) NOT NULL DEFAULT 0,
      created_at INTEGER NOT NULL,
-     retry_ms_at INTEGER     
+     retry_ms_at INTEGER,     
+     from_request_id INTEGER
 );
 CREATE INDEX request_state_retry ON requests(state, retry_ms_at);
 CREATE INDEX request_state_created ON requests(state, created_at);

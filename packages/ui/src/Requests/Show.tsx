@@ -4,7 +4,10 @@ import {
   SimpleShowLayout,
   TextField,
   Datagrid,
+  ReferenceField,
   ReferenceManyField,
+  EditButton,
+  TopToolbar,
   useCreate,
   useNotify,
   useShowContext,
@@ -12,7 +15,8 @@ import {
 import ReplayIcon from '@mui/icons-material/Replay';
 import ConditionalDateField from '../ConditionalDateField';
 import DateFieldSec from '../DateFieldSec';
-import { EditButton, TopToolbar } from 'react-admin';
+import HeadersTable from './HeadersTable';
+import Uint8ArrayField from '../Uint8ArrayField';
 
 const RequestShowActions = () => {
   const notify = useNotify();
@@ -41,8 +45,11 @@ export const RequestsShow = () => (
   <Show actions={<RequestShowActions />}>
     <SimpleShowLayout>
       <TextField source="id" />
+      <ReferenceField source="from_request_id" reference="requests" link="show" />
       <TextField source="method" />
       <TextField source="uri" />
+      <HeadersTable source="headers" />
+      <Uint8ArrayField source="body" />
       <TextField source="state" />
       <DateFieldSec source="created_at" label="Created At" showDate showTime />
       <ConditionalDateField
