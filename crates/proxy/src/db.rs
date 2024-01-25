@@ -52,11 +52,20 @@ pub struct Request {
     pub id: i64,
     pub method: String,
     pub uri: String,
-    pub headers: String,
+    pub headers: sqlx::types::Json<Vec<(String, String)>>,
     pub body: Option<Vec<u8>>,
     pub state: RequestState,
     pub created_at: i64,
     pub retry_ms_at: i64,
+    pub from_request_id: Option<i64>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct UpdateRequest {
+    pub method: String,
+    pub uri: String,
+    pub headers: sqlx::types::Json<Vec<(String, String)>>,
+    pub body: Vec<u8>,
 }
 
 #[derive(Debug, Deserialize, Serialize, sqlx::FromRow)]
@@ -242,7 +251,7 @@ pub async fn list_failed_requests(pool: &SqlitePool) -> Result<Vec<QueuedRequest
             id: request.id,
             method: request.method,
             uri: request.uri,
-            headers: serde_json::from_str(&request.headers).unwrap(),
+            headers: request.headers.0,
             body: request.body,
             state: request.state,
         })
@@ -258,17 +267,35 @@ pub async fn list_requests(
     field: &str,
     order: &str,
     states: Option<Vec<RequestState>>,
+    ids: Option<Vec<i64>>,
 ) -> Result<GetListResponse<Request>> {
     tracing::trace!("list_requests");
     let mut conn = pool.acquire().await?;
 
     let mut q = QueryBuilder::new("SELECT *, COUNT(*) OVER() AS total FROM requests");
 
-    if let Some(states) = states {
+    if let Some(ref states) = states {
         q.push(" WHERE state IN (");
         for (i, state) in states.iter().enumerate() {
             q.push_bind(*state);
             if i < states.len() - 1 {
+                q.push(", ");
+            }
+        }
+        q.push(")");
+    }
+
+    if let Some(ids) = ids {
+        if states.is_some() {
+            q.push(" AND ");
+        } else {
+            q.push(" WHERE ");
+        }
+
+        q.push(" id IN (");
+        for (i, id) in ids.iter().enumerate() {
+            q.push_bind(*id);
+            if i < ids.len() - 1 {
                 q.push(", ");
             }
         }
@@ -621,4 +648,46 @@ pub async fn get_attempt(pool: &SqlitePool, id: i64) -> Result<Attempt> {
         .await?;
 
     Ok(attempt)
+}
+
+pub async fn update_request(pool: &SqlitePool, id: i64, request: UpdateRequest) -> Result<Request> {
+    tracing::trace!("update_request");
+    let mut conn = pool.acquire().await?;
+
+    let query = r#"
+        INSERT INTO requests
+        (
+            method,
+            uri,
+            headers,
+            body,
+            state,
+            created_at,
+            retry_ms_at,
+            from_request_id
+        )
+        VALUES (
+            ?,
+            ?,
+            ?,
+            ?,
+            ?,
+            strftime('%s','now'),
+            strftime('%s','now') || substr(strftime('%f','now'), 4),
+            ?
+        )
+        RETURNING *
+    "#;
+
+    let updated_request = sqlx::query_as::<_, Request>(query)
+        .bind(request.method)
+        .bind(request.uri)
+        .bind(request.headers)
+        .bind(request.body)
+        .bind(RequestState::Created)
+        .bind(id)
+        .fetch_one(&mut *conn)
+        .await?;
+
+    Ok(updated_request)
 }
