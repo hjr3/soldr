@@ -20,7 +20,7 @@ jobs:
         toolchain:
           - stable
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - uses: actions/setup-node@v3
       - uses: extractions/setup-just@v1
       - run: just install build-ui
