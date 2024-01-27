@@ -8,4 +8,4 @@ build-core:
   cargo build
 
 install:
-  cd packages/ui && [ "${CI:-false}" == "true" ] && npm ci || npm i
+  cd packages/ui && {{ if env("CI", "false") == "true" { "npm ci" } else { "npm i" } }}
