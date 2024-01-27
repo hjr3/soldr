@@ -592,7 +592,7 @@ pub async fn purge_completed_requests(pool: &SqlitePool, days: u32) -> Result<()
     let query = r#"
         DELETE FROM requests
         WHERE state = ?
-            AND created_at > strftime('%s','now') - 60 * 60 * 24 * ?;
+            AND created_at < strftime('%s','now') - 60 * 60 * 24 * ?;
     "#;
 
     sqlx::query(query)
