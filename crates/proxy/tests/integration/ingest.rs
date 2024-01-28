@@ -1,6 +1,5 @@
 use crate::common;
 
-use std::net::{SocketAddr, TcpListener};
 use std::sync::Arc;
 
 use axum::body::Body;
@@ -9,6 +8,7 @@ use axum::http::Request;
 use axum::http::StatusCode;
 use axum::{routing::post, Router};
 use soldr::db::RequestState;
+use tokio::net::TcpListener;
 use tokio::sync::Mutex;
 use tokio::time::{sleep, Duration};
 use tower::util::ServiceExt;
@@ -42,18 +42,14 @@ async fn timeout_handler() -> impl axum::response::IntoResponse {
 #[tokio::test]
 async fn ingest_save_and_proxy() {
     // set up origin server
-    let listener = TcpListener::bind("0.0.0.0:0".parse::<SocketAddr>().unwrap()).unwrap();
+    let listener = TcpListener::bind("0.0.0.0:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
     let sentinel: Sentinel = Arc::new(Mutex::new(None));
     let s2 = sentinel.clone();
     let client_app = Router::new().route("/", post(success_handler).with_state(s2));
 
     tokio::spawn(async move {
-        axum::Server::from_tcp(listener)
-            .unwrap()
-            .serve(client_app.into_make_service())
-            .await
-            .unwrap();
+        axum::serve(listener, client_app).await.unwrap();
     });
 
     let (ingest, mgmt, _) = app(&common::config()).await.unwrap();
@@ -74,7 +70,7 @@ async fn ingest_save_and_proxy() {
                 .method("POST")
                 .uri("/origins")
                 .header("Content-Type", "application/json")
-                .body(body.into())
+                .body(body)
                 .unwrap(),
         )
         .await
@@ -117,7 +113,9 @@ async fn ingest_save_and_proxy() {
 
     assert_eq!(response.status(), StatusCode::OK);
 
-    let body = hyper::body::to_bytes(response.into_body()).await.unwrap();
+    let body = axum::body::to_bytes(response.into_body(), 1_000_000)
+        .await
+        .unwrap();
 
     let reqs: Vec<db::Request> = serde_json::from_slice(&body).unwrap();
     assert_eq!(reqs[0].state, RequestState::Completed);
@@ -137,7 +135,9 @@ async fn ingest_save_and_proxy() {
 
     assert_eq!(response.status(), StatusCode::OK);
 
-    let body = hyper::body::to_bytes(response.into_body()).await.unwrap();
+    let body = axum::body::to_bytes(response.into_body(), 1_000_000)
+        .await
+        .unwrap();
 
     let attempts: Vec<db::Attempt> = serde_json::from_slice(&body).unwrap();
     assert_eq!(attempts[0].id, 1);
@@ -154,16 +154,12 @@ async fn ingest_proxy_failure() {
     common::enable_tracing();
 
     // set up origin server
-    let listener = TcpListener::bind("0.0.0.0:0".parse::<SocketAddr>().unwrap()).unwrap();
+    let listener = TcpListener::bind("0.0.0.0:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
     let client_app = Router::new().route("/failure", post(failure_handler));
 
     tokio::spawn(async move {
-        axum::Server::from_tcp(listener)
-            .unwrap()
-            .serve(client_app.into_make_service())
-            .await
-            .unwrap();
+        axum::serve(listener, client_app).await.unwrap();
     });
 
     let (ingest, mgmt, _) = app(&common::config()).await.unwrap();
@@ -190,7 +186,7 @@ async fn ingest_proxy_failure() {
                 .method("POST")
                 .uri("/origins")
                 .header("Content-Type", "application/json")
-                .body(body.into())
+                .body(body)
                 .unwrap(),
         )
         .await
@@ -231,7 +227,9 @@ async fn ingest_proxy_failure() {
 
     assert_eq!(response.status(), StatusCode::OK);
 
-    let body = hyper::body::to_bytes(response.into_body()).await.unwrap();
+    let body = axum::body::to_bytes(response.into_body(), 1_000_000)
+        .await
+        .unwrap();
 
     let reqs: Vec<db::Request> = serde_json::from_slice(&body).unwrap();
     assert_eq!(reqs[0].state, RequestState::Failed);
@@ -251,7 +249,9 @@ async fn ingest_proxy_failure() {
 
     assert_eq!(response.status(), StatusCode::OK);
 
-    let body = hyper::body::to_bytes(response.into_body()).await.unwrap();
+    let body = axum::body::to_bytes(response.into_body(), 1_000_000)
+        .await
+        .unwrap();
 
     let attempts: Vec<db::Attempt> = serde_json::from_slice(&body).unwrap();
     assert_eq!(attempts[0].id, 1);
@@ -265,16 +265,12 @@ async fn ingest_proxy_timeout() {
     common::enable_tracing();
 
     // set up origin server
-    let listener = TcpListener::bind("0.0.0.0:0".parse::<SocketAddr>().unwrap()).unwrap();
+    let listener = TcpListener::bind("0.0.0.0:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
     let client_app = Router::new().route("/timeout", post(timeout_handler));
 
     tokio::spawn(async move {
-        axum::Server::from_tcp(listener)
-            .unwrap()
-            .serve(client_app.into_make_service())
-            .await
-            .unwrap();
+        axum::serve(listener, client_app).await.unwrap();
     });
 
     let (ingest, mgmt, _) = app(&common::config()).await.unwrap();
@@ -295,7 +291,7 @@ async fn ingest_proxy_timeout() {
                 .method("POST")
                 .uri("/origins")
                 .header("Content-Type", "application/json")
-                .body(body.into())
+                .body(body)
                 .unwrap(),
         )
         .await
@@ -336,7 +332,9 @@ async fn ingest_proxy_timeout() {
 
     assert_eq!(response.status(), StatusCode::OK);
 
-    let body = hyper::body::to_bytes(response.into_body()).await.unwrap();
+    let body = axum::body::to_bytes(response.into_body(), 1_000_000)
+        .await
+        .unwrap();
 
     let reqs: Vec<db::Request> = serde_json::from_slice(&body).unwrap();
     assert_eq!(reqs[0].state, RequestState::Timeout);
@@ -356,7 +354,9 @@ async fn ingest_proxy_timeout() {
 
     assert_eq!(response.status(), StatusCode::OK);
 
-    let body = hyper::body::to_bytes(response.into_body()).await.unwrap();
+    let body = axum::body::to_bytes(response.into_body(), 1_000_000)
+        .await
+        .unwrap();
 
     let attempts: Vec<db::Attempt> = serde_json::from_slice(&body).unwrap();
     assert_eq!(attempts[0].id, 1);

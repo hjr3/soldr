@@ -1,9 +1,6 @@
 use anyhow::{anyhow, Result};
-use axum::http::Request;
-use axum::http::Uri;
 use hyper::client::HttpConnector;
-use hyper::Body;
-use hyper::Response;
+use hyper::{Body, Request, Response, Uri};
 use sqlx::SqlitePool;
 use tokio::time::{timeout, Duration};
 
