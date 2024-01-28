@@ -1,4 +1,4 @@
-use axum::http::Uri;
+use hyper::Uri;
 
 pub struct Origin {
     pub uri: Uri,

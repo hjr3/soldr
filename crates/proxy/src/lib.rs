@@ -15,11 +15,9 @@ use std::result::Result as StdResult;
 use anyhow::Result;
 use axum::body::Body;
 use axum::extract::{Extension, State};
-use axum::http::Request;
-use axum::http::StatusCode;
+use axum::http::{HeaderMap, Request, StatusCode};
 use axum::response::IntoResponse;
 use axum::{routing::any, Router};
-use hyper::HeaderMap;
 use queue::RetryQueue;
 use serde::Deserialize;
 use sqlx::sqlite::SqlitePool;
@@ -32,12 +30,21 @@ use crate::proxy::{proxy, Client};
 use crate::request::HttpRequest;
 use crate::request::State as RequestState;
 
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
+pub struct Tls {
+    pub enable: bool,
+    pub cert_path: Option<String>,
+    pub key_path: Option<String>,
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(default)]
 pub struct Config {
     pub database_url: String,
     pub management_listener: String,
     pub ingest_listener: String,
+    pub tls: Tls,
 }
 
 impl Default for Config {
@@ -48,6 +55,11 @@ impl Default for Config {
             database_url: "sqlite::memory:".to_string(),
             management_listener: "0.0.0.0:3443".to_string(),
             ingest_listener: "0.0.0.0:3000".to_string(),
+            tls: Tls {
+                enable: false,
+                cert_path: None,
+                key_path: None,
+            },
         }
     }
 }
@@ -85,7 +97,7 @@ async fn handler(
     let uri = req.uri().to_string();
     let headers = transform_headers(req.headers());
     let body = req.into_body();
-    let body = hyper::body::to_bytes(body).await?;
+    let body = axum::body::to_bytes(body, 1_000_000).await?;
     let r = HttpRequest {
         method,
         uri,

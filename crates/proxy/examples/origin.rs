@@ -1,6 +1,7 @@
 use anyhow::Result;
 use axum::http::StatusCode;
 use axum::{routing::any, Router};
+use tokio::net::TcpListener;
 use tokio::time::{sleep, Duration};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
@@ -20,10 +21,9 @@ async fn main() -> Result<()> {
         .route("/timeout", any(timeout_handler));
 
     let addr = "0.0.0.0:8080";
+    let listener = TcpListener::bind(addr).await?;
     tracing::info!("origin listening on {}", addr);
-    axum::Server::bind(&addr.parse()?)
-        .serve(origin.into_make_service())
-        .await?;
+    axum::serve(listener, origin).await?;
 
     Ok(())
 }

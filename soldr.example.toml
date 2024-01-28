@@ -1,3 +1,9 @@
 database_url = "sqlite:soldr.db?mode=rwc"
 management_listener = "0.0.0.0:3443"
 ingest_listener = "0.0.0.0:3000"
+
+[tls]
+enable = false
+cert_path = "certs/localhost.crt"
+key_path = "certs/localhost.key"
+

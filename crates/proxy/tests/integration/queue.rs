@@ -1,16 +1,16 @@
 use crate::common;
 
-use std::net::{SocketAddr, TcpListener};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use axum::body::Body;
 use axum::http::Request;
 use axum::http::StatusCode;
 use axum::{routing::post, Router};
-use soldr::db::RequestState;
+use tokio::net::TcpListener;
 use tower::util::ServiceExt;
 
 use shared_types::NewOrigin;
+use soldr::db::RequestState;
 use soldr::mgmt::NewQueueRequest;
 use soldr::{app, db};
 
@@ -26,16 +26,12 @@ async fn queue_retry_request() {
     common::enable_tracing();
 
     // set up origin server
-    let listener = TcpListener::bind("0.0.0.0:0".parse::<SocketAddr>().unwrap()).unwrap();
+    let listener = TcpListener::bind("0.0.0.0:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
     let client_app = Router::new().route("/failure", post(failure_handler));
 
     tokio::spawn(async move {
-        axum::Server::from_tcp(listener)
-            .unwrap()
-            .serve(client_app.into_make_service())
-            .await
-            .unwrap();
+        axum::serve(listener, client_app).await.unwrap();
     });
 
     let (ingest, mgmt, retry_queue) = app(&common::config()).await.unwrap();
@@ -56,7 +52,7 @@ async fn queue_retry_request() {
                 .method("POST")
                 .uri("/origins")
                 .header("Content-Type", "application/json")
-                .body(body.into())
+                .body(body)
                 .unwrap(),
         )
         .await
@@ -97,7 +93,9 @@ async fn queue_retry_request() {
 
     assert_eq!(response.status(), StatusCode::OK);
 
-    let body = hyper::body::to_bytes(response.into_body()).await.unwrap();
+    let body = axum::body::to_bytes(response.into_body(), 1_000_000)
+        .await
+        .unwrap();
 
     let reqs: Vec<db::Request> = serde_json::from_slice(&body).unwrap();
     assert_eq!(reqs[0].state, RequestState::Failed);
@@ -118,7 +116,9 @@ async fn queue_retry_request() {
 
     assert_eq!(response.status(), StatusCode::OK);
 
-    let body = hyper::body::to_bytes(response.into_body()).await.unwrap();
+    let body = axum::body::to_bytes(response.into_body(), 1_000_000)
+        .await
+        .unwrap();
 
     let attempts: Vec<db::Attempt> = serde_json::from_slice(&body).unwrap();
     assert_eq!(attempts[0].id, 1);
@@ -139,7 +139,7 @@ async fn queue_retry_request() {
                 .method("POST")
                 .uri("/queue")
                 .header("Content-Type", "application/json")
-                .body(body.into())
+                .body(body)
                 .unwrap(),
         )
         .await
@@ -164,7 +164,9 @@ async fn queue_retry_request() {
 
     assert_eq!(response.status(), StatusCode::OK);
 
-    let body = hyper::body::to_bytes(response.into_body()).await.unwrap();
+    let body = axum::body::to_bytes(response.into_body(), 1_000_000)
+        .await
+        .unwrap();
 
     let attempts: Vec<db::Attempt> = serde_json::from_slice(&body).unwrap();
     assert_eq!(attempts[1].id, 2);
@@ -186,7 +188,9 @@ async fn queue_retry_request() {
 
     assert_eq!(response.status(), StatusCode::OK);
 
-    let body = hyper::body::to_bytes(response.into_body()).await.unwrap();
+    let body = axum::body::to_bytes(response.into_body(), 1_000_000)
+        .await
+        .unwrap();
 
     let requests: Vec<db::Request> = serde_json::from_slice(&body).unwrap();
 

@@ -1,4 +1,5 @@
 use anyhow::Result;
+use axum_server::tls_rustls::RustlsConfig;
 use clap::Parser;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
@@ -32,7 +33,7 @@ async fn main() -> Result<()> {
 
     tokio::spawn(async move {
         tracing::info!("management API listening on {}", mgmt_listener);
-        if let Err(err) = axum::Server::bind(&mgmt_listener)
+        if let Err(err) = axum_server::bind(mgmt_listener)
             .serve(mgmt.into_make_service())
             .await
         {
@@ -45,10 +46,25 @@ async fn main() -> Result<()> {
         retry_queue.start().await;
     });
 
+    let tls_config = if config.tls.enable {
+        let cert_path = config.tls.cert_path.unwrap();
+        let key_path = config.tls.key_path.unwrap();
+        Some(RustlsConfig::from_pem_file(cert_path, key_path).await?)
+    } else {
+        None
+    };
+
     tracing::info!("ingest listening on {}", ingest_listener);
-    axum::Server::bind(&ingest_listener)
-        .serve(ingest.into_make_service())
-        .await?;
+    if let Some(tls_config) = tls_config {
+        tracing::info!("tls configured for {}", ingest_listener);
+        axum_server::bind_rustls(ingest_listener, tls_config)
+            .serve(ingest.into_make_service())
+            .await?;
+    } else {
+        axum_server::bind(ingest_listener)
+            .serve(ingest.into_make_service())
+            .await?;
+    }
 
     Ok(())
 }
