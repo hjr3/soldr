@@ -21,6 +21,7 @@ use axum::{routing::any, Router};
 use queue::RetryQueue;
 use serde::Deserialize;
 use sqlx::sqlite::SqlitePool;
+use tower_http::services::ServeDir;
 
 use crate::cache::OriginCache;
 use crate::db::ensure_schema;
@@ -75,6 +76,7 @@ pub async fn app(config: &Config) -> Result<(Router, Router, RetryQueue)> {
 
     let client = Client::new();
     let router = Router::new()
+        .nest_service("/.well-known", ServeDir::new("public/.well-known"))
         .route("/", any(handler))
         .route("/*path", any(handler))
         .layer(Extension(pool.clone()))
