@@ -23,13 +23,13 @@ async fn main() -> Result<()> {
     let args = Args::parse();
     let config = match args.config_path {
         Some(path) => read_config(&path)?,
-        None => soldr::Config::default(),
+        None => anyhow::bail!("config path is required"),
     };
 
     let (ingest, mgmt, retry_queue) = soldr::app(&config).await?;
 
-    let mgmt_listener = config.management_listener.parse()?;
-    let ingest_listener = config.ingest_listener.parse()?;
+    let mgmt_listener = config.management.listen.parse()?;
+    let ingest_listener = config.proxy.listen.parse()?;
 
     tokio::spawn(async move {
         tracing::info!("management API listening on {}", mgmt_listener);
@@ -69,7 +69,7 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-fn read_config(config_path: &str) -> Result<soldr::Config> {
+fn read_config(config_path: &str) -> Result<soldr::config::Config> {
     let content = std::fs::read_to_string(config_path)?;
     Ok(toml::from_str(&content)?)
 }

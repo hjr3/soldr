@@ -6,6 +6,7 @@ use axum::body::Body;
 use axum::http::Request;
 use axum::http::StatusCode;
 use axum::{routing::post, Router};
+use http_auth_basic::Credentials;
 use tokio::net::TcpListener;
 use tower::util::ServiceExt;
 
@@ -34,7 +35,11 @@ async fn queue_retry_request() {
         axum::serve(listener, client_app).await.unwrap();
     });
 
-    let (ingest, mgmt, retry_queue) = app(&common::config()).await.unwrap();
+    let config = common::config();
+    let (ingest, mgmt, retry_queue) = app(&config).await.unwrap();
+
+    let credentials = Credentials::new(&config.management.secret, "");
+    let credentials = credentials.as_http_header();
 
     // create an origin mapping
     let domain = "example.wh.soldr.dev";
@@ -51,6 +56,7 @@ async fn queue_retry_request() {
             Request::builder()
                 .method("POST")
                 .uri("/origins")
+                .header("Authorization", &credentials)
                 .header("Content-Type", "application/json")
                 .body(body)
                 .unwrap(),
@@ -85,6 +91,7 @@ async fn queue_retry_request() {
                 .method("GET")
                 // /requests?filter={}&range=[0,9]&sort=["id","ASC"]
                 .uri(r#"/requests?filter=%7B%7D&range=%5B0,9%5D&sort=%5B%22id%22,%22ASC%22%5D"#)
+                .header("Authorization", &credentials)
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -108,6 +115,7 @@ async fn queue_retry_request() {
                 .method("GET")
                 // /attempts?filter={}&range=[0,9]&sort=["id","ASC"]
                 .uri("/attempts?filter=%7B%7D&range=%5B0,9%5D&sort=%5B%22id%22,%22ASC%22%5D")
+                .header("Authorization", &credentials)
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -139,6 +147,7 @@ async fn queue_retry_request() {
                 .method("POST")
                 .uri("/queue")
                 .header("Content-Type", "application/json")
+                .header("Authorization", &credentials)
                 .body(body)
                 .unwrap(),
         )
@@ -156,6 +165,7 @@ async fn queue_retry_request() {
                 .method("GET")
                 // /attempts?filter={}&range=[0,9]&sort=["id","ASC"]
                 .uri("/attempts?filter=%7B%7D&range=%5B0,9%5D&sort=%5B%22id%22,%22ASC%22%5D")
+                .header("Authorization", &credentials)
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -180,6 +190,7 @@ async fn queue_retry_request() {
                 .method("GET")
                 // /requests?filter={}&range=[0,9]&sort=["id","ASC"]
                 .uri(r#"/requests?filter=%7B%7D&range=%5B0,9%5D&sort=%5B%22id%22,%22ASC%22%5D"#)
+                .header("Authorization", &credentials)
                 .body(Body::empty())
                 .unwrap(),
         )

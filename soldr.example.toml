@@ -1,6 +1,12 @@
-database_url = "sqlite:soldr.db?mode=rwc"
-management_listener = "0.0.0.0:3443"
-ingest_listener = "0.0.0.0:3000"
+[database]
+url = "sqlite:soldr.db?mode=rwc"
+
+[proxy]
+listen = "0.0.0.0:3000"
+
+[management]
+listen = "0.0.0.0:3443"
+secret = "a secret with minimum length of 32 characters"
 
 [tls]
 enable = false
