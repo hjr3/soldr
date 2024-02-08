@@ -2,7 +2,7 @@ use std::result::Result as StdResult;
 
 use anyhow::{Context, Result};
 use axum::extract::{Extension, Json, Path, Query, Request, State};
-use axum::http::{HeaderMap, HeaderValue, StatusCode};
+use axum::http::{header, HeaderMap, HeaderValue, StatusCode};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::{
@@ -165,11 +165,11 @@ pub fn router(pool: SqlitePool, origin_cache: OriginCache, config: &Config) -> R
         .route("/attempts", get(list_attempts))
         .route("/attempts/:id", get(get_attempt))
         .route("/queue", post(add_request_to_queue))
-        .layer(CorsLayer::permissive())
-        .layer(TraceLayer::new_for_http())
         .layer(Extension(pool))
         .layer(Extension(origin_cache))
         .route_layer(middleware::from_fn_with_state(state, auth))
+        .layer(TraceLayer::new_for_http())
+        .layer(CorsLayer::very_permissive().expose_headers([header::CONTENT_RANGE]))
 }
 
 #[derive(Debug, Deserialize)]

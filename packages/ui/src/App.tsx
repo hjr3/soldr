@@ -1,4 +1,4 @@
-import { Admin, Resource } from 'react-admin';
+import { Admin, Resource, fetchUtils } from 'react-admin';
 import simpleRestProvider from 'ra-data-simple-rest';
 
 import Layout from './Layout';
@@ -9,19 +9,30 @@ import Attempts from './Attempts';
 
 declare global {
   interface Window {
-    apiUrl?: string;
+    config: {
+      apiUrl?: string;
+      apiSecret?: string;
+    };
   }
 }
 
-const config = {
-  apiUrl: import.meta.env.PROD ? window.apiUrl : import.meta.env.VITE_MGMT_API_URL,
-};
+const config = import.meta.env.PROD
+  ? window.config
+  : {
+      apiUrl: import.meta.env.VITE_MGMT_API_URL,
+      apiSecret: import.meta.env.VITE_MGMT_API_SECRET,
+    };
 
 if (!config.apiUrl) {
   throw new Error('API URL is required');
 }
 
-const dataProvider = simpleRestProvider(config.apiUrl);
+const httpClient = (url: string, options: fetchUtils.Options = {}) => {
+  const user = { token: `Basic ${btoa(config.apiSecret)}`, authenticated: true };
+  return fetchUtils.fetchJson(url, { ...options, user });
+};
+
+const dataProvider = simpleRestProvider(config.apiUrl, httpClient);
 
 const App = () => (
   <Admin dataProvider={dataProvider} layout={Layout} dashboard={Dashboard}>
