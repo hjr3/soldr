@@ -154,6 +154,7 @@ pub fn router(pool: SqlitePool, origin_cache: OriginCache, config: &Config) -> R
     };
 
     Router::new()
+        .route("/ping", get(|| async { "pong" }))
         .route("/origins", get(list_origins))
         .route("/origins", post(create_origin))
         .route("/origins/:id", get(get_origin))
