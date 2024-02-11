@@ -32,16 +32,6 @@ async fn main() -> Result<()> {
     let ingest_listener = config.proxy.listen.parse()?;
 
     tokio::spawn(async move {
-        tracing::info!("management API listening on {}", mgmt_listener);
-        if let Err(err) = axum_server::bind(mgmt_listener)
-            .serve(mgmt.into_make_service())
-            .await
-        {
-            eprintln!("Failed to start management API server: {}", err);
-        }
-    });
-
-    tokio::spawn(async move {
         tracing::info!("starting retry queue");
         retry_queue.start().await;
     });
@@ -53,6 +43,25 @@ async fn main() -> Result<()> {
     } else {
         None
     };
+
+    let mgmt_tls_config = tls_config.clone();
+    tokio::spawn(async move {
+        tracing::info!("management API listening on {}", mgmt_listener);
+        if let Some(tls_config) = mgmt_tls_config {
+            tracing::info!("tls configured for {}", mgmt_listener);
+            if let Err(err) = axum_server::bind_rustls(mgmt_listener, tls_config)
+                .serve(mgmt.into_make_service())
+                .await
+            {
+                eprintln!("Failed to start management API server: {}", err);
+            }
+        } else if let Err(err) = axum_server::bind(mgmt_listener)
+            .serve(mgmt.into_make_service())
+            .await
+        {
+            eprintln!("Failed to start management API server: {}", err);
+        }
+    });
 
     tracing::info!("ingest listening on {}", ingest_listener);
     if let Some(tls_config) = tls_config {
