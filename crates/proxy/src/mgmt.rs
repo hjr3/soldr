@@ -1,13 +1,15 @@
 use std::result::Result as StdResult;
 
 use anyhow::{Context, Result};
-use axum::extract::{Extension, Json, Path, Query};
-use axum::http::{HeaderMap, HeaderValue, StatusCode};
-use axum::response::IntoResponse;
+use axum::extract::{Extension, Json, Path, Query, Request, State};
+use axum::http::{header, HeaderMap, HeaderValue, StatusCode};
+use axum::middleware::{self, Next};
+use axum::response::{IntoResponse, Response};
 use axum::{
     routing::{delete, get, post, put},
     Router,
 };
+use axum_auth::AuthBasic;
 use serde::{Deserialize, Serialize};
 use sqlx::sqlite::SqlitePool;
 use tower_http::cors::CorsLayer;
@@ -17,6 +19,7 @@ use tracing::Level;
 use shared_types::{NewOrigin, Origin};
 
 use crate::cache::OriginCache;
+use crate::config::Config;
 use crate::db;
 use crate::error::AppError;
 
@@ -127,8 +130,31 @@ impl SortParams {
     }
 }
 
-pub fn router(pool: SqlitePool, origin_cache: OriginCache) -> Router {
+#[derive(Clone)]
+struct AppState {
+    secret: String,
+}
+
+async fn auth(
+    AuthBasic((password, _)): AuthBasic,
+    State(state): State<AppState>,
+    req: Request,
+    next: Next,
+) -> Result<Response, StatusCode> {
+    if password == state.secret {
+        Ok(next.run(req).await)
+    } else {
+        Err(StatusCode::UNAUTHORIZED)
+    }
+}
+
+pub fn router(pool: SqlitePool, origin_cache: OriginCache, config: &Config) -> Router {
+    let state = AppState {
+        secret: config.management.secret.clone(),
+    };
+
     Router::new()
+        .route("/ping", get(|| async { "pong" }))
         .route("/origins", get(list_origins))
         .route("/origins", post(create_origin))
         .route("/origins/:id", get(get_origin))
@@ -140,10 +166,11 @@ pub fn router(pool: SqlitePool, origin_cache: OriginCache) -> Router {
         .route("/attempts", get(list_attempts))
         .route("/attempts/:id", get(get_attempt))
         .route("/queue", post(add_request_to_queue))
-        .layer(CorsLayer::permissive())
-        .layer(TraceLayer::new_for_http())
         .layer(Extension(pool))
         .layer(Extension(origin_cache))
+        .route_layer(middleware::from_fn_with_state(state, auth))
+        .layer(TraceLayer::new_for_http())
+        .layer(CorsLayer::very_permissive().expose_headers([header::CONTENT_RANGE]))
 }
 
 #[derive(Debug, Deserialize)]

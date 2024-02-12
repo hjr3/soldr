@@ -23,23 +23,13 @@ async fn main() -> Result<()> {
     let args = Args::parse();
     let config = match args.config_path {
         Some(path) => read_config(&path)?,
-        None => soldr::Config::default(),
+        None => anyhow::bail!("config path is required"),
     };
 
     let (ingest, mgmt, retry_queue) = soldr::app(&config).await?;
 
-    let mgmt_listener = config.management_listener.parse()?;
-    let ingest_listener = config.ingest_listener.parse()?;
-
-    tokio::spawn(async move {
-        tracing::info!("management API listening on {}", mgmt_listener);
-        if let Err(err) = axum_server::bind(mgmt_listener)
-            .serve(mgmt.into_make_service())
-            .await
-        {
-            eprintln!("Failed to start management API server: {}", err);
-        }
-    });
+    let mgmt_listener = config.management.listen.parse()?;
+    let ingest_listener = config.proxy.listen.parse()?;
 
     tokio::spawn(async move {
         tracing::info!("starting retry queue");
@@ -53,6 +43,25 @@ async fn main() -> Result<()> {
     } else {
         None
     };
+
+    let mgmt_tls_config = tls_config.clone();
+    tokio::spawn(async move {
+        tracing::info!("management API listening on {}", mgmt_listener);
+        if let Some(tls_config) = mgmt_tls_config {
+            tracing::info!("tls configured for {}", mgmt_listener);
+            if let Err(err) = axum_server::bind_rustls(mgmt_listener, tls_config)
+                .serve(mgmt.into_make_service())
+                .await
+            {
+                eprintln!("Failed to start management API server: {}", err);
+            }
+        } else if let Err(err) = axum_server::bind(mgmt_listener)
+            .serve(mgmt.into_make_service())
+            .await
+        {
+            eprintln!("Failed to start management API server: {}", err);
+        }
+    });
 
     tracing::info!("ingest listening on {}", ingest_listener);
     if let Some(tls_config) = tls_config {
@@ -69,7 +78,7 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-fn read_config(config_path: &str) -> Result<soldr::Config> {
+fn read_config(config_path: &str) -> Result<soldr::config::Config> {
     let content = std::fs::read_to_string(config_path)?;
     Ok(toml::from_str(&content)?)
 }

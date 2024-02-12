@@ -17,3 +17,5 @@ tower-http = { version = "0.4.4", features = ["fs", "trace"] }
 tracing = "0.1.37"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 url = { version = "2.4.1", features = ["serde"] }
+rust-embed = { version = "8.2.0", features = ["axum-ex"] }
+mime_guess = "2.0.4"

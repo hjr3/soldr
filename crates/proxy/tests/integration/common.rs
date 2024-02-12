@@ -2,7 +2,7 @@ use std::sync::Once;
 
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
-use soldr::Config;
+use soldr::config::{Config, Database, Management, Proxy, Tls};
 
 static TRACING_INITIALIZED: Once = Once::new();
 
@@ -24,9 +24,20 @@ pub fn enable_tracing() {
 
 pub fn config() -> Config {
     Config {
-        database_url: "sqlite::memory:".to_string(),
-        management_listener: "0.0.0.0:3443".to_string(),
-        ingest_listener: "0.0.0.0:3000".to_string(),
-        tls: Default::default(),
+        database: Database {
+            url: "sqlite::memory:".to_string(),
+        },
+        management: Management {
+            listen: "0.0.0.0:3443".to_string(),
+            secret: "a secret with minimum length of 32 characters".to_string(),
+        },
+        proxy: Proxy {
+            listen: "0.0.0.0:3000".to_string(),
+        },
+        tls: Tls {
+            enable: false,
+            cert_path: None,
+            key_path: None,
+        },
     }
 }

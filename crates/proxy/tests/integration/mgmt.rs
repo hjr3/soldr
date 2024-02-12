@@ -3,6 +3,7 @@ use crate::common;
 use axum::body::Body;
 use axum::http::Request;
 use axum::http::StatusCode;
+use http_auth_basic::Credentials;
 use tower::util::ServiceExt;
 
 use shared_types::{NewOrigin, Origin};
@@ -10,7 +11,11 @@ use soldr::app;
 
 #[tokio::test]
 async fn mgmt_list_requests() {
-    let (_, mgmt, _) = app(&common::config()).await.unwrap();
+    let config = common::config();
+    let (_, mgmt, _) = app(&config).await.unwrap();
+
+    let credentials = Credentials::new(&config.management.secret, "");
+    let credentials = credentials.as_http_header();
 
     let response = mgmt
         .oneshot(
@@ -18,6 +23,7 @@ async fn mgmt_list_requests() {
                 .method("GET")
                 // /requests?filter={}&range=[0,9]&sort=["id","ASC"]
                 .uri(r#"/requests?filter=%7B%7D&range=%5B0,9%5D&sort=%5B%22id%22,%22ASC%22%5D"#)
+                .header("Authorization", &credentials)
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -34,7 +40,11 @@ async fn mgmt_list_requests() {
 
 #[tokio::test]
 async fn mgmt_create_origin() {
-    let (_, mgmt, _) = app(&common::config()).await.unwrap();
+    let config = common::config();
+    let (_, mgmt, _) = app(&config).await.unwrap();
+
+    let credentials = Credentials::new(&config.management.secret, "");
+    let credentials = credentials.as_http_header();
 
     let create_origin = NewOrigin {
         domain: "example.wh.soldr.dev".to_string(),
@@ -49,6 +59,7 @@ async fn mgmt_create_origin() {
                 .method("POST")
                 .uri("/origins")
                 .header("Content-Type", "application/json")
+                .header("Authorization", &credentials)
                 .body(body)
                 .unwrap(),
         )

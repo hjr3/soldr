@@ -1,18 +1,27 @@
 use std::net::SocketAddr;
 
-use axum::{extract::State, response::Html, routing::get, Router};
-use bpaf::{construct, long, Parser};
-use tower_http::{
-    services::{ServeDir, ServeFile},
-    trace::TraceLayer,
+use axum::{
+    extract::State,
+    http::{header, StatusCode, Uri},
+    response::{Html, IntoResponse, Response},
+    routing::get,
+    Router,
 };
+use bpaf::{construct, long, Parser};
+use rust_embed::RustEmbed;
+use tower_http::trace::TraceLayer;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 mod error;
 
+#[derive(RustEmbed)]
+#[folder = "static/"]
+struct Assets;
+
 #[derive(Clone, Debug)]
 struct Config {
     api_url: String,
+    api_secret: String,
 }
 
 #[tokio::main]
@@ -29,16 +38,20 @@ async fn main() {
         .help("URL of the Soldr Management API")
         .argument::<String>("API_URL");
 
-    let parser = construct!(Config { api_url });
+    let api_secret = long("api-secret")
+        .help("Soldr Management API secret key")
+        .argument::<String>("API_SECRET");
+
+    let parser = construct!(Config {
+        api_url,
+        api_secret
+    });
     let ui_parser = parser.to_options().descr("Soldr UI");
     let config: Config = ui_parser.run();
 
     let app = Router::new()
         .route("/hello", get(|| async { "Hello, World!" }))
-        .nest_service("/assets", ServeDir::new("static/assets"))
-        .nest_service("/vite.svg", ServeFile::new("static/vite.svg"))
-        .route("/", get(serve_html))
-        .route("/*path", get(serve_html))
+        .fallback(static_handler)
         .layer(TraceLayer::new_for_http())
         .with_state(config);
 
@@ -50,14 +63,46 @@ async fn main() {
         .unwrap();
 }
 
-async fn serve_html(State(config): State<Config>) -> Html<String> {
-    let html = include_str!("../static/index.html");
+async fn static_handler(State(config): State<Config>, uri: Uri) -> impl IntoResponse {
+    let path = uri.path().trim_start_matches('/');
 
-    let script_tag = format!(
-        r#"<script type="module">window.apiUrl = "{}";</script>"#,
-        config.api_url
-    );
-    let html = html.replace("<!-- __SOLDR_UI_CONFIG__ -->", script_tag.as_str());
+    if path.is_empty() || path == "index.html" {
+        return index_html(config).await;
+    }
 
-    Html(html)
+    match Assets::get(path) {
+        Some(content) => {
+            let mime = mime_guess::from_path(path).first_or_octet_stream();
+
+            ([(header::CONTENT_TYPE, mime.as_ref())], content.data).into_response()
+        }
+        None => {
+            if path.contains('.') {
+                return not_found().await;
+            }
+
+            index_html(config).await
+        }
+    }
+}
+
+async fn index_html(config: Config) -> Response {
+    match Assets::get("index.html") {
+        Some(content) => {
+            let script_tag = format!(
+                r#"<script type="module">window.config = {{ apiUrl: "{}", apiSecret: "{}" }};</script>"#,
+                config.api_url, config.api_secret
+            );
+
+            let html = String::from_utf8(content.data.into_owned()).unwrap();
+
+            let html = html.replace("<!-- __SOLDR_UI_CONFIG__ -->", script_tag.as_str());
+            Html(html).into_response()
+        }
+        None => not_found().await,
+    }
+}
+
+async fn not_found() -> Response {
+    (StatusCode::NOT_FOUND, "404").into_response()
 }
