@@ -25,30 +25,53 @@ pub async fn proxy(
     origin_cache: &OriginCache,
     client: &Client,
     initial_state: State,
-) {
+) -> Result<()> {
+    let p = Proxy {
+        pool,
+        origin_cache,
+        client,
+    };
+
     let mut state = initial_state;
     loop {
+        match p.next(state).await? {
+            Some(next_state) => {
+                state = next_state;
+            }
+            None => {
+                break;
+            }
+        }
+    }
+
+    Ok(())
+}
+
+pub struct Proxy<'a> {
+    pub pool: &'a SqlitePool,
+    pub origin_cache: &'a OriginCache,
+    pub client: &'a Client,
+}
+
+impl<'a> Proxy<'a> {
+    pub async fn next(&self, state: State) -> Result<Option<State>> {
         match state {
             State::Received(req) => {
-                match insert_request(pool, req, RequestState::Received).await {
-                    Ok(queue_rec) => {
-                        state = State::Created(queue_rec);
-                    }
+                match insert_request(self.pool, req, RequestState::Received).await {
+                    Ok(queue_rec) => Ok(Some(State::Created(queue_rec))),
                     Err(error) => {
                         // TODO log in a format that we can recover the dropped request
                         tracing::error!("Error inserting request {:?}", error);
-                        return;
+                        Err(error)
                     }
                 }
             }
-            State::Created(req) => {
-                state = State::Enqueued(req);
-            }
+            State::Created(req) => Ok(Some(State::Enqueued(req))),
             State::Enqueued(req) => {
-                match update_request_state(pool, req.id, RequestState::Enqueued).await {
+                match update_request_state(self.pool, req.id, RequestState::Enqueued).await {
                     Ok(_) => {
                         // TODO make this return the value
-                        state = State::UnmappedOrigin(req);
+                        Ok(Some(State::UnmappedOrigin(req)))
                     }
                     Err(error) => {
                         tracing::error!(
@@ -57,31 +80,27 @@ pub async fn proxy(
                             &req,
                             error
                         );
-                        return;
+                        Err(error)
                     }
                 }
             }
-            State::UnmappedOrigin(req) => match map_origin(origin_cache, &req).await {
-                Ok(Some(origin)) => {
-                    state = State::Active(req, origin);
-                }
-                Ok(None) => {
-                    state = State::Skipped(req.id);
-                }
+            State::UnmappedOrigin(req) => match map_origin(self.origin_cache, &req).await {
+                Ok(Some(origin)) => Ok(Some(State::Active(req, origin))),
+                Ok(None) => Ok(Some(State::Skipped(req.id))),
                 Err(error) => {
                     tracing::error!("Error mapping origin for {:?}: {:?}", &req, error);
-                    return;
+                    Err(error)
                 }
             },
             State::Active(req, origin) => {
                 let req_id = req.id;
-                match send_request(&origin, client, req).await {
+                match send_request(&origin, self.client, req).await {
                     Ok(response) => {
                         let response = transform_response(response).await;
                         let is_success = response.status().is_success();
                         let is_timeout = response.status() == 504;
 
-                        match record_attempt(pool, req_id, &response).await {
+                        match record_attempt(self.pool, req_id, &response).await {
                             Ok(attempt_id) => {
                                 tracing::debug!(
                                     "Recorded attempt {} for request {}",
@@ -95,27 +114,27 @@ pub async fn proxy(
                                     req_id,
                                     error
                                 );
-                                break;
+                                return Err(error);
                             }
                         }
 
                         if is_success {
-                            state = State::Completed(req_id);
+                            Ok(Some(State::Completed(req_id)))
                         } else if is_timeout {
-                            state = State::Timeout(req_id, origin);
+                            Ok(Some(State::Timeout(req_id, origin)))
                         } else {
-                            state = State::Failed(req_id, origin);
+                            Ok(Some(State::Failed(req_id, origin)))
                         }
                     }
                     Err(error) => {
                         tracing::error!("Error proxying {:?}: {:?}", req_id, error);
-                        state = State::Panic(req_id, origin);
+                        Ok(Some(State::Panic(req_id, origin)))
                     }
                 }
             }
             State::Completed(req_id) => {
-                match update_request_state(pool, req_id, RequestState::Completed).await {
-                    Ok(_) => {}
+                match update_request_state(self.pool, req_id, RequestState::Completed).await {
+                    Ok(_) => Ok(None),
                     Err(error) => {
                         tracing::error!(
                             "Error updating state to {:?} for {:?}: {:?}",
@@ -123,12 +142,12 @@ pub async fn proxy(
                             req_id,
                             error
                         );
+                        Err(error)
                     }
                 }
-                return;
             }
             State::Failed(req_id, origin) => {
-                match retry_request(pool, req_id, RequestState::Failed).await {
+                match retry_request(self.pool, req_id, RequestState::Failed).await {
                     Ok(_) => {}
                     Err(error) => {
                         tracing::error!(
@@ -141,7 +160,7 @@ pub async fn proxy(
                 }
 
                 if let Some(threshold) = origin.alert_threshold {
-                    match attempts_reached_threshold(pool, req_id, threshold).await {
+                    match attempts_reached_threshold(self.pool, req_id, threshold).await {
                         Ok(true) => {
                             send_alert(&origin, req_id).await;
                         }
@@ -159,10 +178,10 @@ pub async fn proxy(
                     }
                 }
 
-                return;
+                Ok(None)
             }
             State::Panic(req_id, origin) => {
-                match retry_request(pool, req_id, RequestState::Panic).await {
+                match retry_request(self.pool, req_id, RequestState::Panic).await {
                     Ok(_) => {}
                     Err(error) => {
                         tracing::error!(
@@ -176,10 +195,10 @@ pub async fn proxy(
 
                 send_alert(&origin, req_id).await;
 
-                return;
+                Ok(None)
             }
             State::Timeout(req_id, origin) => {
-                match retry_request(pool, req_id, RequestState::Timeout).await {
+                match retry_request(self.pool, req_id, RequestState::Timeout).await {
                     Ok(_) => {}
                     Err(error) => {
                         tracing::error!(
@@ -192,7 +211,7 @@ pub async fn proxy(
                 }
 
                 if let Some(threshold) = origin.alert_threshold {
-                    match attempts_reached_threshold(pool, req_id, threshold).await {
+                    match attempts_reached_threshold(self.pool, req_id, threshold).await {
                         Ok(true) => {
                             send_alert(&origin, req_id).await;
                         }
@@ -209,10 +228,10 @@ pub async fn proxy(
                         }
                     }
                 }
-                return;
+                Ok(None)
             }
             State::Skipped(req_id) => {
-                match update_request_state(pool, req_id, RequestState::Skipped).await {
+                match update_request_state(self.pool, req_id, RequestState::Skipped).await {
                     Ok(_) => {}
                     Err(error) => {
                         tracing::error!(
@@ -223,7 +242,8 @@ pub async fn proxy(
                         );
                     }
                 }
-                return;
+
+                Ok(None)
             }
         }
     }
