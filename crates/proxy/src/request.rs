@@ -28,7 +28,7 @@ pub enum State {
     Failed(i64, Origin),
     // unknown error
     Panic(i64, Origin),
-    // request to origin timed out
+    // request to origin timed out and can be retried
     Timeout(i64, Origin),
     // no origin was found
     Skipped(i64),
