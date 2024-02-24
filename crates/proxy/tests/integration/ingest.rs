@@ -386,3 +386,66 @@ async fn ingest_proxy_timeout() {
     assert_eq!(attempts[0].response_status, 504);
     assert_eq!(attempts[0].response_body, b"Timeout");
 }
+
+use soldr::cache::OriginCache;
+use soldr::db::ensure_schema;
+use soldr::mgmt::update_origin_cache;
+use soldr::origin::Origin;
+use soldr::proxy::{Client, Proxy};
+use soldr::request;
+use sqlx::sqlite::SqlitePool;
+
+// FIXME: asbtract this in the lib
+async fn bootstrap() -> (SqlitePool, OriginCache, Client) {
+    let config = common::config();
+
+    let pool = SqlitePool::connect(&config.database.url)
+        .await
+        .expect("Failed to connect to sqlite");
+    ensure_schema(&pool).await.expect("Failed to ensure schema");
+
+    let origin_cache = OriginCache::new();
+    update_origin_cache(&pool, &origin_cache)
+        .await
+        .expect("Failed to update origin cache");
+
+    let client = Client::new();
+
+    (pool, origin_cache, client)
+}
+
+fn random_origin() -> Origin {
+    Origin {
+        uri: "https://www.example.com".parse().unwrap(),
+        timeout: 100,
+        alert_threshold: None,
+        alert_email: None,
+        smtp_host: None,
+        smtp_port: None,
+        smtp_username: None,
+        smtp_password: None,
+        smtp_tls: false,
+    }
+}
+
+#[tokio::test]
+async fn test_complete_failed_update_goes_to_panic() {
+    common::enable_tracing();
+
+    let (pool, origin_cache, client) = bootstrap().await;
+
+    let proxy = Proxy {
+        pool: &pool,
+        origin_cache: &origin_cache,
+        client: &client,
+    };
+
+    let origin = random_origin();
+
+    let state = request::State::Completed(1, origin);
+    let next_state = proxy.next(state).await.unwrap().unwrap();
+    match next_state {
+        request::State::Panic(_, _) => {}
+        _ => panic!("Expected panic state"),
+    }
+}

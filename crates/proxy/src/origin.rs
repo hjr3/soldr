@@ -1,5 +1,6 @@
 use hyper::Uri;
 
+#[derive(Debug)]
 pub struct Origin {
     pub uri: Uri,
     pub timeout: u32,

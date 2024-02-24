@@ -68,7 +68,11 @@ async fn retry_request(
     tracing::trace!("retrying {:?}", &request);
 
     let client = Client::new();
-    proxy::proxy(&pool, &origin_cache, &client, State::Enqueued(request)).await;
+
+    if let Err(error) = proxy::proxy(&pool, &origin_cache, &client, State::Enqueued(request)).await
+    {
+        tracing::error!("{:?}", error);
+    }
 
     Ok(())
 }

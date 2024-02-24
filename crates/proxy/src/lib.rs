@@ -79,7 +79,9 @@ async fn handler(
 
     tracing::debug!("{:?}", &r);
 
-    proxy(&pool, &origin_cache, &client, RequestState::Received(r)).await;
+    if let Err(error) = proxy(&pool, &origin_cache, &client, RequestState::Received(r)).await {
+        tracing::error!("{:?}", error);
+    }
 
     Ok(StatusCode::NO_CONTENT)
 }
