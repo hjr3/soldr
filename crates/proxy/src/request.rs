@@ -11,6 +11,7 @@ pub struct HttpRequest {
     pub body: Option<Vec<u8>>,
 }
 
+#[derive(Debug)]
 pub enum State {
     // request has been received
     Received(HttpRequest),
@@ -23,7 +24,7 @@ pub enum State {
     // request to origin is in progress
     Active(QueuedRequest, Origin),
     // request to origin was successful
-    Completed(i64),
+    Completed(i64, Origin),
     // request to origin had a known error and can be retried
     Failed(i64, Origin),
     // unknown error

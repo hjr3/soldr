@@ -143,17 +143,17 @@ pub async fn update_request_state(
     pool: &SqlitePool,
     req_id: i64,
     state: RequestState,
-) -> Result<()> {
+) -> Result<u64> {
     tracing::trace!("updating request state to {} for {}", state as i8, req_id);
     let mut conn = pool.acquire().await?;
 
-    sqlx::query("UPDATE requests SET state = ? WHERE id = ?")
+    let res = sqlx::query("UPDATE requests SET state = ? WHERE id = ?")
         .bind(state)
         .bind(req_id)
         .execute(&mut *conn)
         .await?;
 
-    Ok(())
+    Ok(res.rows_affected())
 }
 
 pub async fn retry_request(pool: &SqlitePool, req_id: i64, state: RequestState) -> Result<()> {

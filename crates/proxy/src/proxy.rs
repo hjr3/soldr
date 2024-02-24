@@ -100,7 +100,7 @@ impl<'a> Proxy<'a> {
                             )?;
 
                         if is_success {
-                            Ok(Some(State::Completed(req_id)))
+                            Ok(Some(State::Completed(req_id, origin)))
                         } else if is_timeout {
                             Ok(Some(State::Timeout(req_id, origin)))
                         } else {
@@ -115,18 +115,29 @@ impl<'a> Proxy<'a> {
                     }
                 }
             }
-            State::Completed(req_id) => {
-                update_request_state(self.pool, req_id, RequestState::Completed)
-                    .await
-                    .with_context(|| {
-                        format!(
-                            "Error updating state to {:?} for {:?}",
+            State::Completed(req_id, origin) => {
+                match update_request_state(self.pool, req_id, RequestState::Completed).await {
+                    Ok(1) => Ok(None),
+                    Ok(rows) => {
+                        tracing::error!(
+                            "Error updating state to {:?} for {:?}: {:?} = {:?}",
                             RequestState::Completed,
                             req_id,
-                        )
-                    })?;
-
-                Ok(None)
+                            "unexpected number of rows",
+                            rows
+                        );
+                        Ok(Some(State::Panic(req_id, origin)))
+                    }
+                    Err(e) => {
+                        tracing::error!(
+                            "Error updating state to {:?} for {:?}: {:?}",
+                            RequestState::Completed,
+                            req_id,
+                            e
+                        );
+                        Ok(Some(State::Panic(req_id, origin)))
+                    }
+                }
             }
             State::Failed(req_id, origin) => {
                 if let Err(error) = retry_request(self.pool, req_id, RequestState::Failed).await {
@@ -161,21 +172,12 @@ impl<'a> Proxy<'a> {
                 Ok(None)
             }
             State::Panic(req_id, origin) => {
-                // Why are we retrying on unknown errors?
-                if let Err(error) = retry_request(self.pool, req_id, RequestState::Panic).await {
-                    // FIXME: we need to separate fatal errors from recoverable ones
-                    tracing::error!(
-                        "Error calling retry_request for state {:?} on req_id {:?}: {:?}",
-                        RequestState::Panic,
-                        req_id,
-                        error
-                    );
-                }
-
                 send_alert(&origin, req_id).await;
 
                 Ok(None)
             }
+
+            // FIXME: Seems like timeout is a special case of failure
             State::Timeout(req_id, origin) => {
                 match retry_request(self.pool, req_id, RequestState::Timeout).await {
                     Ok(_) => {}
